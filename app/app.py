@@ -12,6 +12,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 DB_PATH = os.environ.get("DB_PATH", "hub.db")
 PORT = int(os.environ.get("PORT", "8765"))
@@ -188,6 +189,33 @@ def summary(db, now_ms):
     }
 
 
+# ---------- export: what the other phones logged, so each phone can show the whole car ----------
+
+EXPORT_PAGE = 5000
+
+
+def export(db, device, after, now_ms):
+    """Samples of every phone except `device` with hub rowid > `after` (one page), plus all their regens with
+    stale open ones closed. The phone keeps `next` as its cursor and asks again while `more` is true."""
+    samples = db.execute(
+        "SELECT rowid, device, phone_rowid, t, soot, temp, regen, odo_m FROM sample "
+        "WHERE rowid > ? AND device != ? ORDER BY rowid LIMIT ?",
+        (after, device, EXPORT_PAGE),
+    ).fetchall()
+    regens = []
+    for dev, rid, start, end, s0, s1 in db.execute(
+        "SELECT device, id, start_t, end_t, soot_start, soot_end FROM regen WHERE device != ?", (device,)
+    ):
+        end = close_if_stale(db, (dev, start, end, s0, s1), now_ms)[2]
+        regens.append([dev, rid, start, end, s0, s1])
+    return {
+        "samples": [list(r[1:]) for r in samples],
+        "regens": regens,
+        "next": samples[-1][0] if samples else after,
+        "more": len(samples) == EXPORT_PAGE,
+    }
+
+
 # ---------- HTTP ----------
 
 class Handler(BaseHTTPRequestHandler):
@@ -209,6 +237,17 @@ class Handler(BaseHTTPRequestHandler):
             db = connect()
             try:
                 self._send(200, summary(db, int(time.time() * 1000)))
+            finally:
+                db.close()
+        elif self.path.startswith("/api/export?"):
+            q = parse_qs(urlsplit(self.path).query)
+            device = q.get("device", [""])[0]
+            after = q.get("after", ["0"])[0]
+            if not DEVICE_RE.match(device) or not after.isdigit():
+                return self._send(400, {"error": "need device=<id>&after=<rowid>"})
+            db = connect()
+            try:
+                self._send(200, export(db, device, int(after), int(time.time() * 1000)))
             finally:
                 db.close()
         elif self.path == "/icon.svg":  # app icon, e.g. for a ZimaOS / CasaOS dashboard tile
@@ -236,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, result)
 
     def log_message(self, fmt, *args):
-        if not self.path.startswith("/api/summary"):  # the dashboard polls; keep the log readable
+        if not self.path.startswith(("/api/summary", "/api/export")):  # polled; keep the log readable
             super().log_message(fmt, *args)
 
 

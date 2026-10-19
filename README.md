@@ -78,13 +78,15 @@ minute after a drive, whenever it is on that Wi-Fi; **Sync now** forces an uploa
 - Distance between regens is the car's distance: the sum of every phone's GPS distance in that window.
 - If a phone is killed mid-regen and never records the end, the hub ends that regen at its last reading.
 
-Each phone keeps its full log too, so losing the hub loses nothing.
+Each phone keeps its full log too, so losing the hub loses nothing. Phones also download the other phones' logs
+from the hub while at home, so each phone's own screen shows the whole car.
 
 ## API
 
 | Method | Path | |
 |---|---|---|
 | `POST` | `/api/sync` | Phone upload: `{device_id, name, samples: [[rowid, t, soot, temp, regen, odo_m]…], regens: [[id, start_t, end_t, odo_start, odo_end, soot_start, soot_end]…]}` |
+| `GET` | `/api/export?device=<id>&after=<cursor>` | What every *other* phone logged, so each phone shows the whole car: `{samples: [[device, phone_rowid, t, soot, temp, regen, odo_m]…], regens: [[device, id, start_t, end_t, soot_start, soot_end]…], next, more}`. Samples come 5000 at a time after `cursor` (start at 0, then pass `next` while `more`); regens are always the full list, stale open ones closed |
 | `GET` | `/api/summary` | Everything the dashboard shows, as JSON |
 | `GET` | `/health` | `{"ok": true}` |
 

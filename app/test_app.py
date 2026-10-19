@@ -70,6 +70,25 @@ class HubTest(unittest.TestCase):
         self.assertIsNone(s["regens"][0]["end"])
         self.assertTrue(s["latest"]["live"] and s["latest"]["regen"])
 
+    def test_export_gives_other_phones_rows_in_pages(self):
+        self.sync(A, "Alex", drive(A, 0, 10, 0), [[1, 2 * MIN, 4 * MIN, None, None, 80, 10]])
+        self.sync(B, "Sam", drive(B, 100 * MIN, 7, 0), [[3, 101 * MIN, None, None, None, 70, None]])
+        app.EXPORT_PAGE, page = 4, app.EXPORT_PAGE
+        try:
+            got, after = [], 0
+            while True:
+                e = app.export(self.db, A, after, 1000 * MIN)
+                got += e["samples"]
+                after = e["next"]
+                if not e["more"]:
+                    break
+        finally:
+            app.EXPORT_PAGE = page
+        self.assertEqual(len(got), 7, "all of Sam's rows, none of Alex's")
+        self.assertTrue(all(r[0] == B for r in got))
+        self.assertEqual(got[0][:3], [B, 1, 100 * MIN])  # device, phone_rowid, t
+        self.assertEqual(e["regens"], [[B, 3, 101 * MIN, 101 * MIN, 70, None]], "stale open regen closed at its start (no regen readings)")
+
 
 if __name__ == "__main__":
     unittest.main()
