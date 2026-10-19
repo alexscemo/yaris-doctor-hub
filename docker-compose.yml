@@ -1,0 +1,10 @@
+# Plain Docker: `docker compose up -d`, then open http://<server-ip>:8765
+services:
+  yaris-hub:
+    image: ghcr.io/alexscemo/yaris-doctor-hub:latest
+    container_name: yaris-hub
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/data

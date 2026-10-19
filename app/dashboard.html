@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yaris Doctor Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- DESIGN.md substitutes: Cormorant Garamond for Copernicus, Inter for StyreneB. System fonts take over offline. -->
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --primary: #cc785c;
+    --on-primary: #ffffff;
+    --canvas: #faf9f5;
+    --surface-card: #efe9de;
+    --hairline: #e6dfd8;
+    --hairline-soft: #ebe6df;
+    --ink: #141413;
+    --body: #3d3d3a;
+    --muted: #6c6a64;
+    --muted-soft: #8e8b82;
+    --instrument: #181715;
+    --on-instrument: #faf9f5;
+    --on-instrument-soft: #a09d96;
+    --accent-teal: #5db8a6;
+    --footer: #181715;
+    --serif: "Cormorant Garamond", "Tiempos Headline", Garamond, "Times New Roman", serif;
+    --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --canvas: #181715;
+      --surface-card: #252320;
+      --hairline: #2f2d29;
+      --hairline-soft: #1f1e1b;
+      --ink: #faf9f5;
+      --body: #faf9f5;
+      --muted: #a09d96;
+      --instrument: #252320;
+      --footer: #1f1e1b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --canvas: #181715;
+    --surface-card: #252320;
+    --hairline: #2f2d29;
+    --hairline-soft: #1f1e1b;
+    --ink: #faf9f5;
+    --body: #faf9f5;
+    --muted: #a09d96;
+    --instrument: #252320;
+    --footer: #1f1e1b;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--canvas); color: var(--body); font: 400 16px/1.55 var(--sans); }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+  h1, h2, .display { font-family: var(--serif); font-weight: 500; color: var(--ink); margin: 0; }
+
+  /* top-nav */
+  nav { height: 64px; display: flex; align-items: center; gap: 12px; }
+  nav h1 { font-size: 28px; line-height: 1.2; letter-spacing: -0.3px; }
+  nav .sub { color: var(--muted); font: 500 14px/1.4 var(--sans); }
+  nav .spacer { flex: 1; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { border: 0; background: transparent; color: var(--muted); font: 500 14px/1.4 var(--sans); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+  .tab[aria-pressed="true"] { background: var(--surface-card); color: var(--ink); }
+
+  .pill { display: inline-flex; align-items: center; gap: 8px; background: var(--surface-card); color: var(--ink);
+          font: 500 13px/1.4 var(--sans); padding: 4px 12px; border-radius: 9999px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-soft); }
+  .dot.live { background: var(--accent-teal); }
+  .badge-coral { background: var(--primary); color: var(--on-primary); font: 500 12px/1.4 var(--sans);
+                 letter-spacing: 1.5px; text-transform: uppercase; padding: 4px 12px; border-radius: 9999px; }
+
+  section { margin-top: 24px; }
+  .card { background: var(--surface-card); border-radius: 12px; padding: 24px; }
+  .callout { background: var(--primary); color: var(--on-primary); border-radius: 12px; padding: 32px; }
+  .callout .display { color: var(--on-primary); font-size: 28px; line-height: 1.2; letter-spacing: -0.3px; margin: 8px 0 4px; }
+  .caps { font: 500 12px/1.4 var(--sans); letter-spacing: 1.5px; text-transform: uppercase; }
+
+  /* product-mockup-card-dark as the instrument panel */
+  .instrument { background: var(--instrument); color: var(--on-instrument); border-radius: 12px; padding: 32px;
+                display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 24px; }
+  .instrument .caps, .instrument .sub { color: var(--on-instrument-soft); }
+  .instrument .value { font-family: var(--serif); font-weight: 500; font-size: 48px; line-height: 1.1; letter-spacing: -1px; margin: 8px 0 4px; color: var(--on-instrument); }
+  .instrument .sub { font-size: 14px; }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 24px; }
+  .card h2, section > h2 { font: 500 18px/1.4 var(--sans); color: var(--ink); }
+  section > h2.display { font-family: var(--serif); font-weight: 500; font-size: 36px; line-height: 1.15; letter-spacing: -0.5px; }
+  .card .hint { color: var(--muted); font-size: 14px; margin: 2px 0 12px; }
+
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; height: 220px; overflow: visible; touch-action: pan-y; }
+  .chart .readout { font: 500 13px/1.4 var(--sans); color: var(--ink); min-height: 18px; margin-bottom: 4px; }
+  .tip { position: absolute; pointer-events: none; background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline);
+         border-radius: 8px; padding: 6px 10px; font: 500 13px/1.4 var(--sans); white-space: nowrap; transform: translate(-50%, -110%); display: none; }
+  .empty { color: var(--muted); font-size: 14px; padding: 48px 0; text-align: center; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font: 500 12px/1.4 var(--sans); letter-spacing: 1.5px; text-transform: uppercase; padding: 8px 12px 8px 0; }
+  td { padding: 12px 12px 12px 0; border-top: 1px solid var(--hairline-soft); color: var(--body); vertical-align: middle; }
+  td.when { color: var(--ink); font-weight: 500; }
+  .table-wrap { overflow-x: auto; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .tile { background: var(--canvas); border: 1px solid var(--hairline); border-radius: 12px; padding: 20px; }
+  .tile h3 { margin: 0 0 4px; font: 500 16px/1.4 var(--sans); color: var(--ink); }
+  .tile p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  footer { background: var(--footer); color: var(--on-instrument-soft); margin-top: 48px; padding: 32px 0; font-size: 14px; }
+
+  @media (max-width: 600px) {
+    nav .sub { display: none; }
+    .instrument { padding: 24px; }
+    .instrument .value { font-size: 36px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <h1>Yaris Doctor</h1><span class="sub">Home hub</span>
+    <span class="spacer"></span>
+    <div class="tabs" role="group" aria-label="Distance units">
+      <button class="tab" data-unit="mi">Miles</button>
+      <button class="tab" data-unit="km">Km</button>
+    </div>
+  </nav>
+
+  <span class="pill" id="status"><span class="dot" id="status-dot"></span><span id="status-text">Loading…</span></span>
+
+  <section id="callout" class="callout" hidden>
+    <div class="caps">Regenerating</div>
+    <div class="display">Keep driving</div>
+    <div id="callout-text"></div>
+  </section>
+
+  <section class="instrument" aria-label="Current state">
+    <div><div class="caps">Soot load</div><div class="value" id="soot">—</div><div class="sub" id="soot-sub"></div></div>
+    <div><div class="caps">Since last regen</div><div class="value" id="since">—</div><div class="sub" id="since-sub"></div></div>
+    <div><div class="caps">Regens logged</div><div class="value" id="count">—</div><div class="sub" id="count-sub"></div></div>
+  </section>
+
+  <section class="grid2">
+    <div class="card"><h2>Soot load</h2><p class="hint">Last 30 days, all phones · hover or tap to read</p><div class="chart" id="soot-chart"></div></div>
+    <div class="card"><h2 id="gap-title">Miles between regens</h2><p class="hint">Last 20 regens, distance from every phone · hover or tap</p><div class="chart" id="gap-chart"></div></div>
+  </section>
+
+  <section>
+    <h2 class="display">Regen history</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Started</th><th>Duration</th><th id="th-gap">Miles since last</th><th>Soot</th><th>Driver</th></tr></thead>
+        <tbody id="history"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="display">Phones</h2>
+    <div class="tiles" id="devices"></div>
+  </section>
+</div>
+<footer><div class="wrap" id="footer">Yaris Doctor home hub · LAN only</div></footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+let unit = "mi";
+try { unit = localStorage.getItem("unit") || "mi"; } catch (e) {}
+let data = null;
+
+const perUnit = () => (unit === "km" ? 1000 : 1609.344);
+const dist = (m) => (m == null ? "—" : `${Math.round(m / perUnit())} ${unit}`);
+const fmt = (t) => new Date(t).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const day = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+const mins = (r) => (r.end == null ? "ongoing" : `${Math.round((r.end - r.start) / 60000)} min`);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const el = (tag, attrs = {}, parent) => {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const mag = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 2.5, 5, 10].find((s) => s * mag >= v) * mag;
+}
+
+/** Single-series chart: coral line over time, or coral columns by index. Hover/tap shows a tooltip. */
+function chart(host, xs, ys, { columns, label, empty }) {
+  host.innerHTML = "";
+  if (!ys.length) { host.innerHTML = `<div class="empty">${empty}</div>`; return; }
+  const readout = document.createElement("div");
+  readout.className = "readout";
+  readout.textContent = label(ys.length - 1);
+  host.appendChild(readout);
+  const svg = el("svg", { role: "img", "aria-label": readout.textContent }, host);
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  host.appendChild(tip);
+
+  const W = svg.clientWidth || 600, H = 220, L = 40, R = 8, T = 8, B = 24;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const yMax = niceMax(Math.max(...ys));
+  const y = (v) => H - B - (H - B - T) * (v / yMax);
+  const slot = (W - L - R) / ys.length;
+  const x = columns ? (i) => L + slot * (i + 0.5)
+    : (i) => (xs.length < 2 || xs.at(-1) === xs[0] ? (L + W - R) / 2 : L + (W - L - R) * (xs[i] - xs[0]) / (xs.at(-1) - xs[0]));
+
+  for (const f of [0, 0.5, 1]) {
+    if (f > 0) el("line", { x1: L, x2: W - R, y1: y(yMax * f), y2: y(yMax * f), stroke: css("--hairline"), "stroke-width": 1 }, svg);
+    el("text", { x: 0, y: y(yMax * f) + 4, fill: css("--muted-soft"), "font-size": 11, "font-family": "Inter, sans-serif" }, svg).textContent = Math.round(yMax * f);
+  }
+  el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: css("--muted-soft"), "stroke-width": 1 }, svg);
+  const axis = (t, anchor, ax) => (el("text", { x: ax, y: H - 6, fill: css("--muted-soft"), "font-size": 11, "text-anchor": anchor, "font-family": "Inter, sans-serif" }, svg).textContent = day(t));
+  axis(xs[0], "start", L);
+  if (xs.length > 1) axis(xs.at(-1), "end", W - R);
+
+  const marks = [];
+  if (columns) {
+    const w = Math.min(24, slot - 2);
+    ys.forEach((v, i) => {
+      const h = Math.max(0, H - B - y(v)), r = Math.min(4, w / 2, h), x0 = x(i) - w / 2, top = y(v);
+      // 4px rounded data end, square at the baseline
+      marks.push(el("path", { d: `M${x0},${H - B} V${top + r} Q${x0},${top} ${x0 + r},${top} H${x0 + w - r} Q${x0 + w},${top} ${x0 + w},${top + r} V${H - B} Z`, fill: css("--primary") }, svg));
+    });
+  } else {
+    el("path", { d: ys.map((v, i) => `${i ? "L" : "M"}${x(i)},${y(v)}`).join(" "), fill: "none", stroke: css("--primary"),
+                 "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+  }
+  const cross = el("line", { y1: T, y2: H - B, stroke: css("--muted-soft"), "stroke-width": 1, visibility: "hidden" }, svg);
+  const ring = el("circle", { r: 6, fill: css("--surface-card"), visibility: columns ? "hidden" : "visible", cx: x(ys.length - 1), cy: y(ys.at(-1)) }, svg);
+  const dot = el("circle", { r: 4, fill: css("--ink"), visibility: columns ? "hidden" : "visible", cx: x(ys.length - 1), cy: y(ys.at(-1)) }, svg);
+
+  // Hit target is the whole plot, bigger than any mark
+  const hit = el("rect", { x: L, y: 0, width: W - L - R, height: H - B, fill: "transparent" }, svg);
+  const show = (evt) => {
+    const box = svg.getBoundingClientRect();
+    const px = (evt.clientX - box.left) * (W / box.width);
+    let i = 0;
+    ys.forEach((_, k) => { if (Math.abs(x(k) - px) < Math.abs(x(i) - px)) i = k; });
+    readout.textContent = label(i);
+    tip.textContent = label(i);
+    tip.style.display = "block";
+    tip.style.left = `${(x(i) / W) * box.width}px`;
+    tip.style.top = `${(y(ys[i]) / H) * box.height + readout.offsetHeight}px`;
+    if (columns) marks.forEach((m, k) => m.setAttribute("opacity", k === i ? 1 : 0.45));
+    else {
+      cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+      for (const c of [ring, dot]) { c.setAttribute("cx", x(i)); c.setAttribute("cy", y(ys[i])); }
+    }
+  };
+  hit.addEventListener("pointermove", show);
+  hit.addEventListener("pointerdown", show);
+  hit.addEventListener("pointerleave", () => {
+    tip.style.display = "none";
+    readout.textContent = label(ys.length - 1);
+    cross.setAttribute("visibility", "hidden");
+    marks.forEach((m) => m.removeAttribute("opacity"));
+    if (!columns) for (const c of [ring, dot]) { c.setAttribute("cx", x(ys.length - 1)); c.setAttribute("cy", y(ys.at(-1))); }
+  });
+}
+
+function render() {
+  if (!data) return;
+  document.querySelectorAll(".tab").forEach((b) => b.setAttribute("aria-pressed", b.dataset.unit === unit));
+  const last = data.latest;
+  $("status-dot").className = "dot" + (last && last.live ? " live" : "");
+  $("status-text").textContent = !last ? "Waiting for the first upload"
+    : last.live ? `Live · ${last.driver} · DPF ${last.temp ?? "?"}°C` : `Last reading ${fmt(last.t)} · ${last.driver}`;
+
+  const running = data.regens.find((r) => r.end == null);
+  $("callout").hidden = !(running && last && last.live);
+  if (running && last) $("callout-text").textContent = `DPF ${last.temp ?? "?"}°C · soot ${last.soot ?? "?"}% · ${Math.round((data.now - running.start) / 60000)} min so far · ${running.drivers.join(", ")}`;
+
+  $("soot").textContent = last && last.soot != null ? `${last.soot}%` : "—";
+  $("soot-sub").textContent = last ? (last.live ? "now" : `at ${fmt(last.t)}`) : "no readings yet";
+  $("since").textContent = dist(data.since_regen_m);
+  $("since-sub").textContent = data.avg_gap_m == null ? "average after two regens" : `avg ${dist(data.avg_gap_m)} between`;
+  $("count").textContent = data.regens.length;
+  $("count-sub").textContent = data.regens.length ? `last ${fmt(data.regens[0].start)}` : "none yet";
+
+  const s = data.soot_series;
+  chart($("soot-chart"), s.map((p) => p[0]), s.map((p) => p[1]), {
+    columns: false, empty: "No readings in the last 30 days.",
+    label: (i) => `${fmt(s[i][0])} · ${Math.round(s[i][1])}% soot`,
+  });
+  const g = data.regens.filter((r) => r.gap_m != null).slice(0, 20).reverse();
+  $("gap-title").textContent = unit === "km" ? "Kilometres between regens" : "Miles between regens";
+  chart($("gap-chart"), g.map((r) => r.start), g.map((r) => r.gap_m / perUnit()), {
+    columns: true, empty: "Needs two logged regens.",
+    label: (i) => `${fmt(g[i].start)} · ${dist(g[i].gap_m)} · ${mins(g[i])}`,
+  });
+
+  $("th-gap").textContent = unit === "km" ? "Km since last" : "Miles since last";
+  $("history").innerHTML = data.regens.length ? "" : `<tr><td colspan="5" class="empty">No regens yet. They appear after a phone syncs.</td></tr>`;
+  for (const r of data.regens.slice(0, 100)) {
+    const tr = document.createElement("tr");
+    const cells = [fmt(r.start), mins(r), r.gap_m == null ? "first logged" : dist(r.gap_m), `${r.soot_start ?? "?"}→${r.soot_end ?? "?"}%`, r.drivers.join(", ")];
+    cells.forEach((c, k) => { const td = document.createElement("td"); td.textContent = c; if (!k) td.className = "when"; tr.appendChild(td); });
+    if (r.end == null) { const b = document.createElement("span"); b.className = "badge-coral"; b.textContent = "Ongoing"; tr.children[1].textContent = ""; tr.children[1].appendChild(b); }
+    $("history").appendChild(tr);
+  }
+
+  $("devices").innerHTML = data.devices.length ? "" : `<p class="empty">No phone has synced yet.</p>`;
+  for (const d of data.devices) {
+    const t = document.createElement("div");
+    t.className = "tile";
+    const h = document.createElement("h3"); h.textContent = d.name;
+    const p = document.createElement("p");
+    p.textContent = `Synced ${fmt(d.last_sync)} · ${dist(d.distance_m)} logged · ${d.samples.toLocaleString()} readings`;
+    t.append(h, p);
+    $("devices").appendChild(t);
+  }
+  $("footer").textContent = `Yaris Doctor home hub · ${data.devices.length} phone${data.devices.length === 1 ? "" : "s"} · updated ${new Date(data.now).toLocaleTimeString()}`;
+}
+
+async function load() {
+  try {
+    const r = await fetch("/api/summary", { cache: "no-store" });
+    if (r.ok) { data = await r.json(); render(); }
+  } catch (e) { $("status-text").textContent = "Hub unreachable, retrying…"; }
+}
+document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
+  unit = b.dataset.unit;
+  try { localStorage.setItem("unit", unit); } catch (e) {}
+  render();
+}));
+let resize;
+addEventListener("resize", () => { clearTimeout(resize); resize = setTimeout(render, 150); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
