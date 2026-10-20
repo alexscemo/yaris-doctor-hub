@@ -89,6 +89,55 @@ class HubTest(unittest.TestCase):
         self.assertEqual(got[0][:3], [B, 1, 100 * MIN])  # device, phone_rowid, t
         self.assertEqual(e["regens"], [[B, 3, 101 * MIN, 101 * MIN, 70, None]], "stale open regen closed at its start (no regen readings)")
 
+    # Rows of the phone's table (Pid.kt pidDefs), with payloads from the Techstream capture
+    DEFS = [
+        ["DD", 136, 143, 18, False, 2, 1, 0, 0, "PM Accumulation Ratio", "%", "DPF / exhaust", None],
+        ["F1", 32, 47, 9, True, 25, 4, 0, 1, "Exhaust Temperature B1S1", "°C", "DPF / exhaust", None],
+        ["AD", 64, 79, 26, True, 1, 1, 0, 1, "Pilot 1 Injection Timing", "deg(CA)", "Fuel / injection", None],
+        ["DF", 72, 79, 15, False, 1, 1, 0, 0, "DPNR/DPF Status Reju(PM)", "", "DPF / exhaust", ["Standby", "Ready", "Operate", "Compl"]],
+    ]
+    DD = "440029642420291432" "09C4C75512004F8D17"
+    F1 = "00660060005F005636"
+
+    def test_frames_decode_like_the_phone(self):
+        r = app.ingest(self.db, {"device_id": A, "defs": self.DEFS,
+                                 "frames": [[1, 1000, "DD", self.DD], [2, 1000, "F1", self.F1], [3, 2000, "DD", self.DD[:-2] + "19"]]}, 0)
+        self.assertEqual(r["frames"], 3, "the reply tells the phone frames are stored")
+        v = {x["name"]: x for x in app.live(self.db, 5000)["values"]}
+        self.assertEqual(v["PM Accumulation Ratio"]["value"], 50.0)  # newest frame: 0x19 * 2
+        self.assertEqual(v["PM Accumulation Ratio"]["t"], 2000)
+        self.assertAlmostEqual(v["Exhaust Temperature B1S1"]["value"], 59.3)  # 95*25/4 = 593 (truncated) / 10
+        self.assertIsNone(v["Pilot 1 Injection Timing"]["value"], "never read")
+        self.assertEqual(app.series(self.db, "DD.136", 1800000), [[1000, 46.0], [2000, 50.0]])
+        # Signed fields, truncated toward zero like Kotlin: 0xFFBA = -70 → -7.0; 0xFFFF = -1, -1*25/4 = -6.25 → -6 → -0.6
+        self.assertEqual(app.decode(self.DEFS[2], "0" * 16 + "FFBA" + "0" * 32), -7.0)
+        self.assertEqual(app.decode(self.DEFS[1], "0" * 8 + "FFFF" + "0" * 6), -0.6)
+        self.assertEqual(app.decode(self.DEFS[3], "0" * 18 + "02" + "0" * 10), 2.0)
+
+    def test_rejects_bad_frames_alerts_and_defs(self):
+        for extra in (
+            {"frames": [[1, 1, "DD", "6x"]]},                                            # not hex
+            {"frames": [[1, 1, "21DD", "00"]]},                                          # lid is one byte
+            {"alerts": [[1, "Coolant Hot", 1, "x", 0, None]]},                           # key format
+            {"alerts": [[1, "dtc", 1, "x" * 301, 0, None]]},                             # text too long
+            {"defs": [["DD", 136, 143, 18, False, 2, 0, 0, 0, "x", "%", "c", None]]},    # div 0
+            {"defs": [["DD", 136, 200, 18, False, 2, 1, 0, 0, "x", "%", "c", None]]},    # bits past the payload
+        ):
+            with self.assertRaises(ValueError, msg=extra):
+                app.ingest(self.db, {"device_id": A, **extra}, 0)
+
+    def test_alerts_one_per_key_open_first(self):
+        self.sync(A, "Alex")
+        self.sync(B, "Sam")
+        app.ingest(self.db, {"device_id": A, "alerts": [[1, "dtc", 1, "1 fault code", 100, 200], [2, "coolant_hot", 1, "106 °C", 300, 400]]}, 0)
+        app.ingest(self.db, {"device_id": B, "alerts": [[1, "dtc", 1, "2 fault codes", 500, None]]}, 0)
+        got = app.alerts(self.db, 0)
+        self.assertEqual([(a["key"], a["text"], a["end"]) for a in got], [("dtc", "2 fault codes", None), ("coolant_hot", "106 °C", 400)])
+        # The phone resends an alert when it ends: the newer copy replaces it
+        app.ingest(self.db, {"device_id": B, "alerts": [[1, "dtc", 1, "2 fault codes", 500, 900]]}, 0)
+        self.assertEqual(app.alerts(self.db, 0)[0]["end"], 900)
+        self.assertEqual(app.alerts(self.db, 1000), [], "both ended before the window")
+
 
 if __name__ == "__main__":
     unittest.main()

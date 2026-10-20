@@ -22,6 +22,10 @@ MAX_ROWS = 10_000
 DEVICE_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 MERGE_SLACK_MS = 2 * 60_000  # regens seen by two phones (dongle hand-over) closer than this are one regen
 LIVE_MS = 60_000
+HEX_RE = re.compile(r"^(?:[0-9A-F]{2}){1,64}$")
+LID_RE = re.compile(r"^[0-9A-F]{2}$")
+KEY_RE = re.compile(r"^[a-z0-9_]{1,40}$")
+PID_ID_RE = re.compile(r"^[0-9A-F]{2}\.\d{1,3}$")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS device(id TEXT PRIMARY KEY, name TEXT NOT NULL, last_sync INTEGER NOT NULL);
@@ -35,6 +39,15 @@ CREATE TABLE IF NOT EXISTS regen(
     device TEXT NOT NULL, id INTEGER NOT NULL, start_t INTEGER NOT NULL, end_t INTEGER,
     odo_start REAL, odo_end REAL, soot_start INTEGER, soot_end INTEGER,
     PRIMARY KEY(device, id));
+CREATE TABLE IF NOT EXISTS frame(
+    device TEXT NOT NULL, phone_rowid INTEGER NOT NULL, t INTEGER NOT NULL, lid TEXT NOT NULL, hex TEXT NOT NULL,
+    PRIMARY KEY(device, phone_rowid));
+CREATE INDEX IF NOT EXISTS frame_lid_t ON frame(lid, t);
+CREATE TABLE IF NOT EXISTS alert(
+    device TEXT NOT NULL, id INTEGER NOT NULL, key TEXT NOT NULL, level INTEGER NOT NULL, text TEXT NOT NULL,
+    start_t INTEGER NOT NULL, end_t INTEGER,
+    PRIMARY KEY(device, id));
+CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 """
 
 write_lock = threading.Lock()  # SQLite takes one writer; uploads are rare, so serialise them
@@ -66,6 +79,35 @@ def _rows(value, width, name):
     return value
 
 
+def _str(v, limit, name):
+    if not isinstance(v, str) or len(v) > limit:
+        raise ValueError(f"{name} must be text of at most {limit} characters")
+    return v
+
+
+def _match(v, rx, name):
+    if not isinstance(v, str) or not rx.match(v):
+        raise ValueError(f"bad {name}: {v!r}")
+    return v
+
+
+def _defs(value):
+    """The phone's PID table, which decodes frames (see Pid.kt pidDefs). Checked field by field: the dashboard shows it."""
+    out = []
+    for r in _rows(value, 13, "defs"):
+        lid, bs, be, ln, signed, mul, div, off, dec, name, unit, cat, enum = r
+        bs, be, ln, mul, div, off, dec = (_num(x, required=True) for x in (bs, be, ln, mul, div, off, dec))
+        if not (0 <= bs <= be < ln * 8 <= 512 and div > 0 and 0 <= dec <= 6 and be - bs < 64):
+            raise ValueError(f"bad pid def {r!r}")
+        if not isinstance(signed, bool):
+            raise ValueError("signed must be true or false")
+        if enum is not None and (not isinstance(enum, list) or len(enum) > 16):
+            raise ValueError("enum must be a list of at most 16 labels")
+        out.append([_match(lid, LID_RE, "lid"), bs, be, ln, signed, mul, div, off, dec, _str(name, 80, "name"), _str(unit, 16, "unit"),
+                    _str(cat, 40, "category"), None if enum is None else [_str(e, 40, "enum label") for e in enum]])
+    return out
+
+
 def ingest(db, body, now_ms):
     if not isinstance(body, dict):
         raise ValueError("body must be a JSON object")
@@ -83,7 +125,22 @@ def ingest(db, body, now_ms):
         (dev, _num(r[0], required=True), _num(r[1], required=True), _num(r[2]), _num(r[3], float), _num(r[4], float), _num(r[5]), _num(r[6]))
         for r in _rows(body.get("regens", []), 7, "regens")
     ]
+    frames = [
+        (dev, _num(r[0], required=True), _num(r[1], required=True), _match(r[2], LID_RE, "lid"), _match(r[3], HEX_RE, "hex"))
+        for r in _rows(body.get("frames", []), 4, "frames")
+    ]
+    alerts = [
+        (dev, _num(r[0], required=True), _match(r[1], KEY_RE, "alert key"), _num(r[2], required=True), _str(r[3], 300, "alert text"),
+         _num(r[4], required=True), _num(r[5]))
+        for r in _rows(body.get("alerts", []), 6, "alerts")
+    ]
+    defs = _defs(body["defs"]) if body.get("defs") is not None else None
     with write_lock, db:
+        db.executemany("INSERT OR IGNORE INTO frame VALUES (?,?,?,?,?)", frames)
+        # Alerts gain an end time and new text after upload, so the latest copy wins, like regens
+        db.executemany("INSERT OR REPLACE INTO alert VALUES (?,?,?,?,?,?,?)", alerts)
+        if defs is not None:
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('defs', ?)", (json.dumps(defs),))
         # Re-sent rows are ignored, so a phone that lost our reply can simply upload again
         db.executemany("INSERT OR IGNORE INTO sample VALUES (?,?,?,?,?,?,?)", samples)
         # Regens change after upload (end_t is set when they finish), so the phone resends them and the latest wins
@@ -92,7 +149,8 @@ def ingest(db, body, now_ms):
             "INSERT INTO device VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, last_sync = excluded.last_sync",
             (dev, name, now_ms),
         )
-    return {"ok": True, "samples": len(samples), "regens": len(regens)}
+    # "frames" in the reply tells the phone this hub stores them (an older hub would silently drop them)
+    return {"ok": True, "samples": len(samples), "regens": len(regens), "frames": len(frames), "alerts": len(alerts)}
 
 
 # ---------- summary for the dashboard ----------
@@ -186,7 +244,70 @@ def summary(db, now_ms):
         "regens": regens[::-1],
         "soot_series": soot,
         "devices": devices,
+        "alerts": alerts(db, now_ms - 7 * 86_400_000),
     }
+
+
+# ---------- live data: frames decoded with the phone's PID table (same maths as Pid.kt decode) ----------
+
+def decode(d, hexs):
+    """Value of def `d` in payload `hexs` (hex after "61 <lid>"), or None when the payload is too short."""
+    _, bs, be, ln, signed, mul, div, off, dec = d[:9]
+    if len(hexs) < ln * 2:
+        return None
+    raw = int(hexs[bs // 8 * 2:(be // 8 + 1) * 2], 16)
+    bits = be - bs + 1
+    raw = raw >> (7 - be % 8) & ((1 << bits) - 1)
+    if signed and raw >> (bits - 1) & 1:
+        raw -= 1 << bits
+    q = abs(raw * mul) // div  # truncating toward zero, like Techstream and Kotlin's Long division
+    return ((q if raw * mul >= 0 else -q) + off) / 10 ** dec
+
+
+def defs_of(db):
+    row = db.execute("SELECT v FROM meta WHERE k = 'defs'").fetchone()
+    return json.loads(row[0]) if row else []
+
+
+def live(db, now_ms):
+    """Latest value of every PID (from any phone) and when it was read."""
+    out, latest = [], {}
+    for d in defs_of(db):
+        lid = d[0]
+        if lid not in latest:
+            latest[lid] = db.execute("SELECT t, hex FROM frame WHERE lid = ? ORDER BY t DESC LIMIT 1", (lid,)).fetchone()
+        row = latest[lid]
+        out.append({
+            "id": f"{lid}.{d[1]}", "name": d[9], "unit": d[10], "category": d[11], "enum": d[12], "decimals": d[8],
+            "t": row[0] if row else None, "value": decode(d, row[1]) if row else None,
+        })
+    return {"now": now_ms, "values": out}
+
+
+def series(db, pid_id, span_ms):
+    """[[t, value], ...] of one PID over the last `span_ms` it was read, oldest first."""
+    d = next((d for d in defs_of(db) if f"{d[0]}.{d[1]}" == pid_id), None)
+    if d is None:
+        return []
+    rows = db.execute(
+        "SELECT t, hex FROM frame WHERE lid = ?1 AND t >= (SELECT MAX(t) FROM frame WHERE lid = ?1) - ?2 ORDER BY t", (d[0], span_ms)
+    ).fetchall()
+    return [[t, v] for t, h in rows if (v := decode(d, h)) is not None]
+
+
+def alerts(db, since_ms):
+    """Open alerts and those that ended after `since_ms`, one per key across phones: open first, then the newest."""
+    rows = db.execute(
+        "SELECT a.key, a.level, a.text, a.start_t, a.end_t, d.name FROM alert a JOIN device d ON d.id = a.device "
+        "WHERE a.end_t IS NULL OR a.end_t >= ? ORDER BY a.end_t IS NOT NULL, a.level DESC, COALESCE(a.end_t, a.start_t) DESC",
+        (since_ms,),
+    ).fetchall()
+    seen, out = set(), []
+    for key, level, text, start, end, driver in rows:
+        if key not in seen:
+            seen.add(key)
+            out.append({"key": key, "level": level, "text": text, "start": start, "end": end, "driver": driver})
+    return out
 
 
 # ---------- export: what the other phones logged, so each phone can show the whole car ----------
@@ -250,6 +371,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, export(db, device, int(after), int(time.time() * 1000)))
             finally:
                 db.close()
+        elif self.path == "/api/live":
+            db = connect()
+            try:
+                self._send(200, live(db, int(time.time() * 1000)))
+            finally:
+                db.close()
+        elif self.path.startswith("/api/series?"):
+            q = parse_qs(urlsplit(self.path).query)
+            pid_id = q.get("id", [""])[0]
+            span = q.get("span", ["1800000"])[0]
+            if not PID_ID_RE.match(pid_id) or not span.isdigit():
+                return self._send(400, {"error": "need id=<lid>.<bit>&span=<ms>"})
+            db = connect()
+            try:
+                self._send(200, {"points": series(db, pid_id, min(int(span), 7 * 86_400_000))})
+            finally:
+                db.close()
         elif self.path == "/icon.svg":  # app icon, e.g. for a ZimaOS / CasaOS dashboard tile
             self._send(200, (HERE / "icon.svg").read_bytes(), "image/svg+xml")
         elif self.path == "/health":
@@ -275,7 +413,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, result)
 
     def log_message(self, fmt, *args):
-        if not self.path.startswith(("/api/summary", "/api/export")):  # polled; keep the log readable
+        if not self.path.startswith(("/api/summary", "/api/export", "/api/live", "/api/series")):  # polled; keep the log readable
             super().log_message(fmt, *args)
 
 

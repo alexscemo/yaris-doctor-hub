@@ -113,6 +113,31 @@
   .tile h3 { margin: 0 0 4px; font: 500 16px/1.4 var(--sans); color: var(--ink); }
   .tile p { margin: 0; color: var(--muted); font-size: 14px; }
 
+  /* view chips: the phone's Overview / All data tabs */
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border: 0; background: var(--surface-card); color: var(--ink); font: 500 13px/1.4 var(--sans); padding: 8px 14px;
+          border-radius: 9999px; cursor: pointer; min-height: 36px; }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--canvas); }
+  .views { margin: 8px 0 16px; }
+
+  .health h2 { display: flex; align-items: center; gap: 10px; }
+  .health .dot { width: 10px; height: 10px; background: var(--accent-teal); }
+  .health .dot.warn { background: var(--primary); }
+  .health p { margin: 8px 0 0; color: var(--ink); font-size: 14px; }
+  .health p.old { color: var(--muted); }
+  .health .caps { color: var(--muted); margin-top: 16px; }
+
+  .search { width: 100%; font: 400 16px/1.4 var(--sans); color: var(--ink); background: var(--canvas); border: 1px solid var(--hairline);
+            border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
+  .search::placeholder { color: var(--muted); }
+  .values { margin-top: 8px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hairline-soft); cursor: pointer; }
+  .row .name { flex: 1; color: var(--ink); }
+  .row .sub { display: block; color: var(--muted); font-size: 14px; }
+  .row .val { color: var(--ink); font-weight: 500; text-align: right; white-space: nowrap; }
+  .row .age { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+  .row:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
   footer { background: var(--footer); color: var(--on-instrument-soft); margin-top: 48px; padding: 32px 0; font-size: 14px; }
 
   @media (max-width: 600px) {
@@ -133,7 +158,15 @@
     </div>
   </nav>
 
+  <div class="chips views" role="group" aria-label="View">
+    <button class="chip" data-view="overview">Overview</button>
+    <button class="chip" data-view="live">Live data</button>
+  </div>
+
+  <div id="view-overview">
   <span class="pill" id="status"><span class="dot" id="status-dot"></span><span id="status-text">Loading…</span></span>
+
+  <section class="card health" id="health" aria-live="polite"></section>
 
   <section id="callout" class="callout" hidden>
     <div class="caps">Regenerating</div>
@@ -166,6 +199,14 @@
     <h2 class="display">Phones</h2>
     <div class="tiles" id="devices"></div>
   </section>
+  </div>
+
+  <div id="view-live" hidden>
+    <p class="hint" id="live-head" style="color: var(--muted); margin: 0;">Loading…</p>
+    <input class="search" id="live-search" type="search" placeholder="Search values" aria-label="Search values">
+    <div class="chips" id="live-cats" role="group" aria-label="Category"></div>
+    <div class="values" id="live-rows"></div>
+  </div>
 </div>
 <footer><div class="wrap" id="footer">Yaris Doctor home hub · LAN only</div></footer>
 
@@ -195,7 +236,7 @@ function niceMax(v) {
 }
 
 /** Single-series chart: coral line over time, or coral columns by index. Hover/tap shows a tooltip. */
-function chart(host, xs, ys, { columns, label, empty }) {
+function chart(host, xs, ys, { columns, label, empty, axisFmt = day }) {
   host.innerHTML = "";
   if (!ys.length) { host.innerHTML = `<div class="empty">${empty}</div>`; return; }
   const readout = document.createElement("div");
@@ -209,18 +250,20 @@ function chart(host, xs, ys, { columns, label, empty }) {
 
   const W = svg.clientWidth || 600, H = 220, L = 40, R = 8, T = 8, B = 24;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  const yMax = niceMax(Math.max(...ys));
-  const y = (v) => H - B - (H - B - T) * (v / yMax);
+  // Live values can be negative (injection timing, signed pressures): the axis then runs from a nice minimum
+  const yMax = niceMax(Math.max(...ys)), yMin = Math.min(...ys) < 0 ? -niceMax(-Math.min(...ys)) : 0;
+  const y = (v) => H - B - (H - B - T) * ((v - yMin) / (yMax - yMin));
   const slot = (W - L - R) / ys.length;
   const x = columns ? (i) => L + slot * (i + 0.5)
     : (i) => (xs.length < 2 || xs.at(-1) === xs[0] ? (L + W - R) / 2 : L + (W - L - R) * (xs[i] - xs[0]) / (xs.at(-1) - xs[0]));
 
   for (const f of [0, 0.5, 1]) {
-    if (f > 0) el("line", { x1: L, x2: W - R, y1: y(yMax * f), y2: y(yMax * f), stroke: css("--hairline"), "stroke-width": 1 }, svg);
-    el("text", { x: 0, y: y(yMax * f) + 4, fill: css("--muted-soft"), "font-size": 11, "font-family": "Inter, sans-serif" }, svg).textContent = Math.round(yMax * f);
+    const at = yMin + (yMax - yMin) * f;
+    if (f > 0) el("line", { x1: L, x2: W - R, y1: y(at), y2: y(at), stroke: css("--hairline"), "stroke-width": 1 }, svg);
+    el("text", { x: 0, y: y(at) + 4, fill: css("--muted-soft"), "font-size": 11, "font-family": "Inter, sans-serif" }, svg).textContent = +at.toPrecision(3);
   }
   el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: css("--muted-soft"), "stroke-width": 1 }, svg);
-  const axis = (t, anchor, ax) => (el("text", { x: ax, y: H - 6, fill: css("--muted-soft"), "font-size": 11, "text-anchor": anchor, "font-family": "Inter, sans-serif" }, svg).textContent = day(t));
+  const axis = (t, anchor, ax) => (el("text", { x: ax, y: H - 6, fill: css("--muted-soft"), "font-size": 11, "text-anchor": anchor, "font-family": "Inter, sans-serif" }, svg).textContent = axisFmt(t));
   axis(xs[0], "start", L);
   if (xs.length > 1) axis(xs.at(-1), "end", W - R);
 
@@ -310,6 +353,8 @@ function render() {
     $("history").appendChild(tr);
   }
 
+  renderHealth(data.alerts || []);
+
   $("devices").innerHTML = data.devices.length ? "" : `<p class="empty">No phone has synced yet.</p>`;
   for (const d of data.devices) {
     const t = document.createElement("div");
@@ -323,6 +368,121 @@ function render() {
   $("footer").textContent = `Yaris Doctor home hub · ${data.devices.length} phone${data.devices.length === 1 ? "" : "s"} · updated ${new Date(data.now).toLocaleTimeString()}`;
 }
 
+/** Same card as the phone's Overview: "All good", or the open alerts, then the ones seen in the last 7 days. */
+function renderHealth(alerts) {
+  const open = alerts.filter((a) => a.end == null), old = alerts.filter((a) => a.end != null);
+  const level = Math.max(0, ...open.map((a) => a.level));
+  const h = $("health");
+  h.innerHTML = "";
+  const title = document.createElement("h2");
+  const dot = document.createElement("span");
+  dot.className = "dot" + (level ? " warn" : "");
+  title.append(dot, level === 2 ? "Check the car now" : level ? "Warning" : "All good");
+  h.appendChild(title);
+  const line = (text, cls) => { const p = document.createElement("p"); p.textContent = text; if (cls) p.className = cls; h.appendChild(p); };
+  if (!open.length) line("Every check on the engine data is within range.", "old");
+  for (const a of open) line(`${a.level === 2 ? "Critical: " : ""}${a.text} (${a.driver})`);
+  if (old.length) {
+    const c = document.createElement("div"); c.className = "caps"; c.textContent = "Seen in the last 7 days"; h.appendChild(c);
+    for (const a of old) line(`${fmt(a.start)} · ${a.text} (${a.driver})`, "old");
+  }
+}
+
+// ---------- Live data view: every engine value the phones upload, like the phone's All data tab ----------
+let view = "overview", live = null, cat = null, query = "", open = null;
+try { view = localStorage.getItem("view") || "overview"; } catch (e) {}
+
+const valueText = (v) => {
+  if (v.value == null) return "—";
+  if (v.enum) return v.enum[Math.trunc(v.value)] ?? `? (${v.value})`;
+  return `${v.value.toFixed(v.decimals)}${v.unit ? " " + v.unit : ""}`;
+};
+const time = (t) => new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const age = (t) => {
+  const s = Math.round((live.now - t) / 1000);
+  return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : fmt(t);
+};
+
+function showView(v) {
+  view = v;
+  try { localStorage.setItem("view", v); } catch (e) {}
+  document.querySelectorAll(".chip[data-view]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === v));
+  $("view-overview").hidden = v !== "overview";
+  $("view-live").hidden = v !== "live";
+  if (v === "live") loadLive();
+}
+
+function renderLive() {
+  if (!live) return;
+  const vals = live.values;
+  const newest = Math.max(0, ...vals.map((v) => v.t || 0));
+  $("live-head").textContent = !vals.length || !newest ? "No engine data yet. It appears after a phone with the new app syncs."
+    : live.now - newest <= 60000 ? `Live · ${vals.length} values` : `From the last drive, ${fmt(newest)} · ${vals.length} values`;
+
+  const cats = $("live-cats");
+  cats.innerHTML = "";
+  for (const c of [null, ...[...new Set(vals.map((v) => v.category))].sort()]) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = c ?? "All";
+    b.setAttribute("aria-pressed", c === cat);
+    b.addEventListener("click", () => { cat = c; renderLive(); });
+    cats.appendChild(b);
+  }
+
+  const rows = $("live-rows");
+  rows.innerHTML = "";
+  const shown = vals.filter((v) => (cat == null || v.category === cat) && (!query || v.name.toLowerCase().includes(query.toLowerCase())));
+  if (!shown.length) rows.innerHTML = `<p class="empty">No value matches.</p>`;
+  for (const v of shown) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-expanded", open === v.id);
+    const name = document.createElement("span"); name.className = "name"; name.textContent = v.name;
+    const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = cat == null ? v.category : `Request 21 ${v.id.slice(0, 2)}`;
+    name.appendChild(sub);
+    const val = document.createElement("span"); val.className = "val"; val.textContent = valueText(v);
+    if (v.t) { const a = document.createElement("span"); a.className = "age"; a.textContent = age(v.t); val.appendChild(a); }
+    row.append(name, val);
+    const toggle = () => { open = open === v.id ? null : v.id; renderLive(); };
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    rows.appendChild(row);
+    if (open === v.id) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `<p class="hint" style="margin-top: 0">Last 30 minutes it was read · hover or tap to read</p>`;
+      const host = document.createElement("div"); host.className = "chart";
+      card.appendChild(host);
+      rows.appendChild(card);
+      loadSeries(v, host);
+    }
+  }
+}
+
+async function loadSeries(v, host) {
+  try {
+    const r = await fetch(`/api/series?id=${encodeURIComponent(v.id)}&span=1800000`, { cache: "no-store" });
+    const pts = (await r.json()).points;
+    chart(host, pts.map((p) => p[0]), pts.map((p) => p[1]), {
+      columns: false, empty: "Not read yet.", axisFmt: time,
+      label: (i) => `${time(pts[i][0])} · ${valueText({ ...v, value: pts[i][1] })}`,
+    });
+  } catch (e) { host.innerHTML = `<div class="empty">Hub unreachable.</div>`; }
+}
+
+async function loadLive() {
+  try {
+    const r = await fetch("/api/live", { cache: "no-store" });
+    if (r.ok) { live = await r.json(); renderLive(); }
+  } catch (e) { $("live-head").textContent = "Hub unreachable, retrying…"; }
+}
+$("live-search").addEventListener("input", (e) => { query = e.target.value.trim(); renderLive(); });
+document.querySelectorAll(".chip[data-view]").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+setInterval(() => { if (view === "live") loadLive(); }, 10000);
+
 async function load() {
   try {
     const r = await fetch("/api/summary", { cache: "no-store" });
@@ -335,8 +495,9 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
   render();
 }));
 let resize;
-addEventListener("resize", () => { clearTimeout(resize); resize = setTimeout(render, 150); });
+addEventListener("resize", () => { clearTimeout(resize); resize = setTimeout(() => { render(); renderLive(); }, 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+showView(view);
 load();
 setInterval(load, 30000);
 </script>

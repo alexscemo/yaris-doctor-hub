@@ -77,6 +77,11 @@ minute after a drive, whenever it is on that Wi-Fi; **Sync now** forces an uploa
 - A regen seen by two phones (one hands the dongle to the other mid-burn) counts once.
 - Distance between regens is the car's distance: the sum of every phone's GPS distance in that window.
 - If a phone is killed mid-regen and never records the end, the hub ends that regen at its last reading.
+- **Live data:** the phones also upload every raw engine reply ("frames") and their PID table, so the **Live data** view
+  shows each of the ~100 engine values decoded the same way as the app, with a 30-minute chart per value. The hub keeps
+  every frame it receives (the phones thin theirs after 30 days).
+- **Health:** the phones run the health checks and upload what they find. The Overview's status card shows "All good"
+  or the open warnings, and what was seen in the last 7 days. The hub repeats the phones' results and checks nothing itself.
 
 Each phone keeps its full log too, so losing the hub loses nothing. Phones also download the other phones' logs
 from the hub while at home, so each phone's own screen shows the whole car.
@@ -85,9 +90,11 @@ from the hub while at home, so each phone's own screen shows the whole car.
 
 | Method | Path | |
 |---|---|---|
-| `POST` | `/api/sync` | Phone upload: `{device_id, name, samples: [[rowid, t, soot, temp, regen, odo_m]…], regens: [[id, start_t, end_t, odo_start, odo_end, soot_start, soot_end]…]}` |
+| `POST` | `/api/sync` | Phone upload: `{device_id, name, samples: [[rowid, t, soot, temp, regen, odo_m]…], regens: [[id, start_t, end_t, odo_start, odo_end, soot_start, soot_end]…]}`, optionally `frames: [[rowid, t, lid, hex]…]`, `alerts: [[id, key, level, text, start_t, end_t]…]` and `defs` (the PID table: `[[lid, bit_start, bit_end, len, signed, mul, div, offset, decimals, name, unit, category, enum]…]`). The reply counts what was stored; its `frames` key tells the phone this hub stores frames |
 | `GET` | `/api/export?device=<id>&after=<cursor>` | What every *other* phone logged, so each phone shows the whole car: `{samples: [[device, phone_rowid, t, soot, temp, regen, odo_m]…], regens: [[device, id, start_t, end_t, soot_start, soot_end]…], next, more}`. Samples come 5000 at a time after `cursor` (start at 0, then pass `next` while `more`); regens are always the full list, stale open ones closed |
-| `GET` | `/api/summary` | Everything the dashboard shows, as JSON |
+| `GET` | `/api/summary` | Everything the Overview shows, as JSON, including `alerts` (open and last 7 days, one per check) |
+| `GET` | `/api/live` | Latest decoded value of every engine PID: `{now, values: [{id, name, unit, category, enum, decimals, t, value}…]}` |
+| `GET` | `/api/series?id=<lid>.<bit>&span=<ms>` | One PID over the last `span` ms it was read (max 7 days): `{points: [[t, value]…]}` |
 | `GET` | `/health` | `{"ok": true}` |
 
 Settings via environment: `DB_PATH` (default `/data/hub.db`), `PORT` (default `8765`).
