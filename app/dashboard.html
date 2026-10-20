@@ -444,7 +444,7 @@ function renderLive() {
     const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = cat == null ? v.category : `Request 21 ${v.id.slice(0, 2)}`;
     name.appendChild(sub);
     const val = document.createElement("span"); val.className = "val"; val.textContent = valueText(v);
-    if (v.t) { const a = document.createElement("span"); a.className = "age"; a.textContent = age(v.t); val.appendChild(a); }
+    if (v.t) { const a = document.createElement("span"); a.className = "age"; a.dataset.t = v.t; a.textContent = age(v.t); val.appendChild(a); }
     row.append(name, val);
     const toggle = () => { open = open === v.id ? null : v.id; renderLive(); };
     row.addEventListener("click", toggle);
@@ -476,7 +476,13 @@ async function loadSeries(v, host) {
 async function loadLive() {
   try {
     const r = await fetch("/api/live", { cache: "no-store" });
-    if (r.ok) { live = await r.json(); renderLive(); }
+    if (!r.ok) return;
+    const next = await r.json();
+    const same = live && JSON.stringify(next.values) === JSON.stringify(live.values);
+    live = next;
+    // Values unchanged (e.g. parked at home): only refresh the ages, so focus and the open chart survive
+    if (same) document.querySelectorAll("#live-rows .age").forEach((a) => { a.textContent = age(+a.dataset.t); });
+    else renderLive();
   } catch (e) { $("live-head").textContent = "Hub unreachable, retrying…"; }
 }
 $("live-search").addEventListener("input", (e) => { query = e.target.value.trim(); renderLive(); });
