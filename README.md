@@ -82,6 +82,9 @@ minute after a drive, whenever it is on that Wi-Fi; **Sync now** forces an uploa
   every frame it receives (the phones thin theirs after 30 days).
 - **Health:** the phones run the health checks and upload what they find. The Overview's status card shows "All good"
   or the open warnings, and what was seen in the last 7 days. The hub repeats the phones' results and checks nothing itself.
+- **Warning history:** every warning a phone ever logged is kept. Click one (in the status card or the Warning history
+  table) to open it: what the check looks for and where its threshold comes from, every time it happened, and a chart
+  of each value it reads from 2 minutes before to 2 minutes after, with the warning's own time shaded.
 
 Each phone keeps its full log too, so losing the hub loses nothing. Phones also download the other phones' logs
 from the hub while at home, so each phone's own screen shows the whole car.
@@ -90,11 +93,12 @@ from the hub while at home, so each phone's own screen shows the whole car.
 
 | Method | Path | |
 |---|---|---|
-| `POST` | `/api/sync` | Phone upload: `{device_id, name, samples: [[rowid, t, soot, temp, regen, odo_m]…], regens: [[id, start_t, end_t, odo_start, odo_end, soot_start, soot_end]…]}`, optionally `frames: [[rowid, t, lid, hex]…]`, `alerts: [[id, key, level, text, start_t, end_t]…]` and `defs` (the PID table: `[[lid, bit_start, bit_end, len, signed, mul, div, offset, decimals, name, unit, category, enum]…]`). The reply counts what was stored; its `frames` key tells the phone this hub stores frames |
+| `POST` | `/api/sync` | Phone upload: `{device_id, name, samples: [[rowid, t, soot, temp, regen, odo_m]…], regens: [[id, start_t, end_t, odo_start, odo_end, soot_start, soot_end]…]}`, optionally `frames: [[rowid, t, lid, hex]…]`, `alerts: [[id, key, level, text, start_t, end_t]…]`, `rules: [[key, title, level, about, [value names]]…]` and `defs` (the PID table: `[[lid, bit_start, bit_end, len, signed, mul, div, offset, decimals, name, unit, category, enum]…]`). The reply counts what was stored; its `frames` key tells the phone this hub stores frames |
 | `GET` | `/api/export?device=<id>&after=<cursor>` | What every *other* phone logged, so each phone shows the whole car: `{samples: [[device, phone_rowid, t, soot, temp, regen, odo_m]…], regens: [[device, id, start_t, end_t, soot_start, soot_end]…], next, more}`. Samples come 5000 at a time after `cursor` (start at 0, then pass `next` while `more`); regens are always the full list, stale open ones closed |
 | `GET` | `/api/summary` | Everything the Overview shows, as JSON, including `alerts` (open and last 7 days, one per check) |
 | `GET` | `/api/live` | Latest decoded value of every engine PID: `{now, values: [{id, name, unit, category, enum, decimals, t, value}…]}` |
-| `GET` | `/api/series?id=<lid>.<bit>&span=<ms>` | One PID over the last `span` ms it was read (max 7 days): `{points: [[t, value]…]}` |
+| `GET` | `/api/series?id=<lid>.<bit>&span=<ms>` | One PID over the last `span` ms it was read (max 7 days): `{points: [[t, value]…]}`. With `from=<ms>&to=<ms>` instead: that window, at most a day |
+| `GET` | `/api/warnings` | Every warning, newest first (up to 500), and each check's title, level, description and the values it reads: `{rules: {key: {title, level, about, values}}, history: [{key, level, text, start, end, driver}…]}` |
 | `GET` | `/health` | `{"ok": true}` |
 
 Settings via environment: `DB_PATH` (default `/data/hub.db`), `PORT` (default `8765`).

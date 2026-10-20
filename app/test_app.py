@@ -138,6 +138,37 @@ class HubTest(unittest.TestCase):
         self.assertEqual(app.alerts(self.db, 0)[0]["end"], 900)
         self.assertEqual(app.alerts(self.db, 1000), [], "both ended before the window")
 
+    RULES = [
+        ["soot_high", "DPF soot high", 1, "DPF soot at 100-139 %.", ["PM Accumulation Ratio"]],
+        ["regen_frequent", "Regens too frequent", 1, "Regens under 150 km apart.", []],
+        ["coolant_hot", "Coolant hot", 1, "Coolant at 105-111 °C.", ["Coolant Temp"]],  # value not in DEFS: dropped
+    ]
+
+    def test_warning_history_with_rules_and_the_values_to_chart(self):
+        app.ingest(self.db, {"device_id": A, "name": "Alex", "defs": self.DEFS, "rules": self.RULES,
+                             "frames": [[1, 1000, "DD", self.DD], [2, 5000, "DD", self.DD[:-2] + "40"], [3, 9000, "DD", self.DD]],
+                             "alerts": [[1, "soot_high", 1, "DPF soot is at 128 %.", 4000, 6000],
+                                        [2, "regen_frequent", 1, "Only 90 km apart.", 7000, None]]}, 0)
+        w = app.warnings(self.db)
+        self.assertEqual([h["key"] for h in w["history"]], ["regen_frequent", "soot_high"], "newest first")
+        soot = w["rules"]["soot_high"]
+        self.assertEqual((soot["title"], soot["about"]), ("DPF soot high", "DPF soot at 100-139 %."))
+        self.assertEqual([v["id"] for v in soot["values"]], ["DD.136"])
+        self.assertEqual(w["rules"]["regen_frequent"]["values"], [])
+        self.assertEqual(w["rules"]["coolant_hot"]["values"], [])
+        # The chart around that warning: only frames inside the window
+        self.assertEqual(app.series(self.db, "DD.136", 0, (3000, 7000)), [[5000, 128.0]])
+
+    def test_rejects_bad_rules(self):
+        for rules in (
+            [["Soot High", "t", 1, "a", []]],          # key format
+            [["soot_high", "t", 3, "a", []]],          # level
+            [["soot_high", "t", 1, "x" * 601, []]],    # description too long
+            [["soot_high", "t", 1, "a", "PM"]],        # uses not a list
+        ):
+            with self.assertRaises(ValueError, msg=rules):
+                app.ingest(self.db, {"device_id": A, "rules": rules}, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

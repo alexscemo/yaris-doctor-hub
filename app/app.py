@@ -108,6 +108,20 @@ def _defs(value):
     return out
 
 
+def _rules(value):
+    """The phone's health rules (Checks.kt ruleDefs): [key, title, level, about, uses]; shown on the warning detail."""
+    out = []
+    for r in _rows(value, 5, "rules"):
+        key, title, level, about, uses = r
+        if level not in (1, 2) or isinstance(level, bool):
+            raise ValueError("rule level must be 1 or 2")
+        if not isinstance(uses, list) or len(uses) > 12:
+            raise ValueError("rule uses must be a list of at most 12 value names")
+        out.append([_match(key, KEY_RE, "rule key"), _str(title, 80, "rule title"), level, _str(about, 600, "rule description"),
+                    [_str(u, 80, "value name") for u in uses]])
+    return out
+
+
 def ingest(db, body, now_ms):
     if not isinstance(body, dict):
         raise ValueError("body must be a JSON object")
@@ -135,12 +149,15 @@ def ingest(db, body, now_ms):
         for r in _rows(body.get("alerts", []), 6, "alerts")
     ]
     defs = _defs(body["defs"]) if body.get("defs") is not None else None
+    rules = _rules(body["rules"]) if body.get("rules") is not None else None
     with write_lock, db:
         db.executemany("INSERT OR IGNORE INTO frame VALUES (?,?,?,?,?)", frames)
         # Alerts gain an end time and new text after upload, so the latest copy wins, like regens
         db.executemany("INSERT OR REPLACE INTO alert VALUES (?,?,?,?,?,?,?)", alerts)
         if defs is not None:
             db.execute("INSERT OR REPLACE INTO meta VALUES ('defs', ?)", (json.dumps(defs),))
+        if rules is not None:
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('rules', ?)", (json.dumps(rules),))
         # Re-sent rows are ignored, so a phone that lost our reply can simply upload again
         db.executemany("INSERT OR IGNORE INTO sample VALUES (?,?,?,?,?,?,?)", samples)
         # Regens change after upload (end_t is set when they finish), so the phone resends them and the latest wins
@@ -284,15 +301,37 @@ def live(db, now_ms):
     return {"now": now_ms, "values": out}
 
 
-def series(db, pid_id, span_ms):
-    """[[t, value], ...] of one PID over the last `span_ms` it was read, oldest first."""
+def series(db, pid_id, span_ms, window=None):
+    """[[t, value], ...] of one PID oldest first: over the last `span_ms` it was read, or within `window` = (from, to)."""
     d = next((d for d in defs_of(db) if f"{d[0]}.{d[1]}" == pid_id), None)
     if d is None:
         return []
-    rows = db.execute(
-        "SELECT t, hex FROM frame WHERE lid = ?1 AND t >= (SELECT MAX(t) FROM frame WHERE lid = ?1) - ?2 ORDER BY t", (d[0], span_ms)
-    ).fetchall()
+    if window:
+        rows = db.execute("SELECT t, hex FROM frame WHERE lid = ? AND t BETWEEN ? AND ? ORDER BY t", (d[0], *window)).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT t, hex FROM frame WHERE lid = ?1 AND t >= (SELECT MAX(t) FROM frame WHERE lid = ?1) - ?2 ORDER BY t", (d[0], span_ms)
+        ).fetchall()
     return [[t, v] for t, h in rows if (v := decode(d, h)) is not None]
+
+
+def warnings(db, limit=500):
+    """Every stored warning, newest first, plus what each rule checks and the values it reads (as PID ids for /api/series)."""
+    ids = {}
+    for d in defs_of(db):
+        ids.setdefault(d[9], {"id": f"{d[0]}.{d[1]}", "name": d[9], "unit": d[10], "enum": d[12], "decimals": d[8]})
+    row = db.execute("SELECT v FROM meta WHERE k = 'rules'").fetchone()
+    rules = {
+        key: {"title": title, "level": level, "about": about, "values": [ids[u] for u in uses if u in ids]}
+        for key, title, level, about, uses in (json.loads(row[0]) if row else [])
+    }
+    history = [
+        {"key": k, "level": lv, "text": tx, "start": st, "end": en, "driver": dr}
+        for k, lv, tx, st, en, dr in db.execute(
+            "SELECT a.key, a.level, a.text, a.start_t, a.end_t, d.name FROM alert a JOIN device d ON d.id = a.device "
+            "ORDER BY a.start_t DESC LIMIT ?", (limit,))
+    ]
+    return {"rules": rules, "history": history}
 
 
 def alerts(db, since_ms):
@@ -381,11 +420,20 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(urlsplit(self.path).query)
             pid_id = q.get("id", [""])[0]
             span = q.get("span", ["1800000"])[0]
-            if not PID_ID_RE.match(pid_id) or not span.isdigit():
-                return self._send(400, {"error": "need id=<lid>.<bit>&span=<ms>"})
+            t0, t1 = q.get("from", [""])[0], q.get("to", [""])[0]
+            if not PID_ID_RE.match(pid_id) or not span.isdigit() or (t0 or t1) and not (t0.isdigit() and t1.isdigit()):
+                return self._send(400, {"error": "need id=<lid>.<bit> and span=<ms> or from=<ms>&to=<ms>"})
+            # A window of at most a day: a warning's own span plus a margin, never the whole history
+            window = (int(t0), min(int(t1), int(t0) + 86_400_000)) if t0 else None
             db = connect()
             try:
-                self._send(200, {"points": series(db, pid_id, min(int(span), 7 * 86_400_000))})
+                self._send(200, {"points": series(db, pid_id, min(int(span), 7 * 86_400_000), window)})
+            finally:
+                db.close()
+        elif self.path == "/api/warnings":
+            db = connect()
+            try:
+                self._send(200, warnings(db))
             finally:
                 db.close()
         elif self.path == "/icon.svg":  # app icon, e.g. for a ZimaOS / CasaOS dashboard tile
@@ -413,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, result)
 
     def log_message(self, fmt, *args):
-        if not self.path.startswith(("/api/summary", "/api/export", "/api/live", "/api/series")):  # polled; keep the log readable
+        if not self.path.startswith(("/api/summary", "/api/export", "/api/live", "/api/series", "/api/warnings")):  # polled; keep the log readable
             super().log_message(fmt, *args)
 
 

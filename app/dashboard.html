@@ -138,6 +138,26 @@
   .row .age { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
   .row:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
+  /* Warnings: clickable rows and the detail dialog */
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background: var(--surface-card); }
+  tr.clickable:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+  .health button.open { all: unset; display: block; cursor: pointer; margin: 8px 0 0; color: var(--ink); font-size: 14px; }
+  .health button.open.old { color: var(--muted); margin-top: 6px; }
+  .health button.open:hover { text-decoration: underline; }
+  .health button.open:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); border: 1px solid var(--hairline); border-radius: 12px;
+           padding: 24px; background: var(--canvas); color: var(--body); }
+  dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+  dialog h2 { font-family: var(--serif); font-weight: 500; font-size: 28px; line-height: 1.2; color: var(--ink); margin: 0; flex: 1; }
+  dialog .head { display: flex; align-items: center; gap: 12px; }
+  dialog .close { border: 1px solid var(--hairline); background: var(--canvas); color: var(--ink); border-radius: 9999px;
+                  width: 36px; height: 36px; font-size: 18px; cursor: pointer; }
+  dialog .about { margin: 12px 0 0; }
+  dialog .caps { color: var(--muted); margin: 20px 0 8px; }
+  dialog .card { margin-top: 12px; padding: 16px; }
+  dialog .card h3 { margin: 0 0 4px; font: 500 14px/1.4 var(--sans); color: var(--ink); }
+
   footer { background: var(--footer); color: var(--on-instrument-soft); margin-top: 48px; padding: 32px 0; font-size: 14px; }
 
   @media (max-width: 600px) {
@@ -186,6 +206,16 @@
   </section>
 
   <section>
+    <h2 class="display">Warning history</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Started</th><th>Warning</th><th>Duration</th><th>Driver</th></tr></thead>
+        <tbody id="warn-history"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
     <h2 class="display">Regen history</h2>
     <div class="table-wrap">
       <table>
@@ -208,6 +238,14 @@
     <div class="values" id="live-rows"></div>
   </div>
 </div>
+<dialog id="warn-dialog" aria-labelledby="warn-title">
+  <div class="head"><h2 id="warn-title"></h2><span id="warn-level"></span><button class="close" id="warn-close" aria-label="Close">×</button></div>
+  <p class="about" id="warn-about"></p>
+  <div class="caps">Occurrences</div>
+  <div class="chips" id="warn-times" role="group" aria-label="Occurrences"></div>
+  <p class="hint" id="warn-text" style="margin: 12px 0 0;"></p>
+  <div id="warn-charts"></div>
+</dialog>
 <footer><div class="wrap" id="footer">Yaris Doctor home hub · LAN only</div></footer>
 
 <script>
@@ -236,7 +274,7 @@ function niceMax(v) {
 }
 
 /** Single-series chart: coral line over time, or coral columns by index. Hover/tap shows a tooltip. */
-function chart(host, xs, ys, { columns, label, empty, axisFmt = day }) {
+function chart(host, xs, ys, { columns, label, empty, axisFmt = day, band }) {
   host.innerHTML = "";
   if (!ys.length) { host.innerHTML = `<div class="empty">${empty}</div>`; return; }
   const readout = document.createElement("div");
@@ -263,6 +301,11 @@ function chart(host, xs, ys, { columns, label, empty, axisFmt = day }) {
     el("text", { x: 0, y: y(at) + 4, fill: css("--muted-soft"), "font-size": 11, "font-family": "Inter, sans-serif" }, svg).textContent = +at.toPrecision(3);
   }
   el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: css("--muted-soft"), "stroke-width": 1 }, svg);
+  // band = [t0, t1]: shade when the warning was active (line charts only)
+  if (band && !columns && xs.length > 1 && xs.at(-1) > xs[0]) {
+    const tx = (t) => Math.min(W - R, Math.max(L, L + (W - L - R) * (t - xs[0]) / (xs.at(-1) - xs[0])));
+    el("rect", { x: tx(band[0]), y: T, width: Math.max(2, tx(band[1]) - tx(band[0])), height: H - B - T, fill: css("--primary"), opacity: 0.15 }, svg);
+  }
   const axis = (t, anchor, ax) => (el("text", { x: ax, y: H - 6, fill: css("--muted-soft"), "font-size": 11, "text-anchor": anchor, "font-family": "Inter, sans-serif" }, svg).textContent = axisFmt(t));
   axis(xs[0], "start", L);
   if (xs.length > 1) axis(xs.at(-1), "end", W - R);
@@ -380,11 +423,18 @@ function renderHealth(alerts) {
   title.append(dot, level === 2 ? "Check the car now" : level ? "Warning" : "All good");
   h.appendChild(title);
   const line = (text, cls) => { const p = document.createElement("p"); p.textContent = text; if (cls) p.className = cls; h.appendChild(p); };
+  const link = (a, text, old) => {
+    const b = document.createElement("button");
+    b.className = "open" + (old ? " old" : "");
+    b.textContent = text;
+    b.addEventListener("click", () => openWarning(a));
+    h.appendChild(b);
+  };
   if (!open.length) line("Every check on the engine data is within range.", "old");
-  for (const a of open) line(`${a.level === 2 ? "Critical: " : ""}${a.text} (${a.driver})`);
+  for (const a of open) link(a, `${a.level === 2 ? "Critical: " : ""}${a.text} (${a.driver})`);
   if (old.length) {
     const c = document.createElement("div"); c.className = "caps"; c.textContent = "Seen in the last 7 days"; h.appendChild(c);
-    for (const a of old) line(`${fmt(a.start)} · ${a.text} (${a.driver})`, "old");
+    for (const a of old) link(a, `${fmt(a.start)} · ${a.text} (${a.driver})`, true);
   }
 }
 
@@ -489,10 +539,102 @@ $("live-search").addEventListener("input", (e) => { query = e.target.value.trim(
 document.querySelectorAll(".chip[data-view]").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
 setInterval(() => { if (view === "live") loadLive(); }, 10000);
 
+// ---------- Warnings: every stored warning, and a detail view with the values around it ----------
+let warnData = null;
+const ruleOf = (key) => (warnData && warnData.rules[key]) || { title: key, level: 1, about: "", values: [] };
+const lasted = (a) => (a.end == null ? "ongoing" : a.end - a.start < 60000 ? "under 1 min" : `${Math.round((a.end - a.start) / 60000)} min`);
+
+function renderWarnings() {
+  const body = $("warn-history");
+  body.innerHTML = warnData.history.length ? "" : `<tr><td colspan="4" class="empty">No warnings yet. They appear after a phone syncs.</td></tr>`;
+  for (const a of warnData.history.slice(0, 100)) {
+    const tr = document.createElement("tr");
+    tr.className = "clickable";
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    const rule = ruleOf(a.key);
+    const cells = [fmt(a.start), `${rule.title} · ${a.text}`, lasted(a), a.driver];
+    cells.forEach((c, k) => { const td = document.createElement("td"); td.textContent = c; if (!k) td.className = "when"; tr.appendChild(td); });
+    if (a.level === 2) { const b = document.createElement("span"); b.className = "badge-coral"; b.textContent = "Critical"; tr.children[1].prepend(b, " "); }
+    tr.addEventListener("click", () => openWarning(a));
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openWarning(a); } });
+    body.appendChild(tr);
+  }
+}
+
+/** Opens the detail of warning `a` (one occurrence): what the rule checks, every occurrence, and charts around the chosen one. */
+function openWarning(a) {
+  const rule = ruleOf(a.key);
+  $("warn-title").textContent = rule.title;
+  $("warn-level").innerHTML = "";
+  const badge = document.createElement("span");
+  badge.className = rule.level === 2 ? "badge-coral" : "pill";
+  badge.textContent = rule.level === 2 ? "Critical" : "Warning";
+  $("warn-level").appendChild(badge);
+  $("warn-about").textContent = rule.about || "No description from the phone yet. It arrives with the next sync of the updated app.";
+  const times = (warnData ? warnData.history : []).filter((h) => h.key === a.key);
+  if (!times.some((h) => h.start === a.start)) times.unshift(a);
+  const pick = (occ) => {
+    $("warn-times").querySelectorAll(".chip").forEach((b) => b.setAttribute("aria-pressed", +b.dataset.start === occ.start));
+    $("warn-text").textContent = `${fmt(occ.start)} · ${lasted(occ)} · ${occ.driver} · ${occ.text}`;
+    showWarningCharts(rule, occ);
+  };
+  $("warn-times").innerHTML = "";
+  for (const occ of times.slice(0, 30)) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.dataset.start = occ.start;
+    b.textContent = `${fmt(occ.start)} · ${lasted(occ)}`;
+    b.addEventListener("click", () => pick(occ));
+    $("warn-times").appendChild(b);
+  }
+  const dlg = $("warn-dialog");
+  if (!dlg.open) dlg.showModal();
+  pick(a);
+}
+
+/** One chart per value the rule reads, from 2 min before to 2 min after the warning, its span shaded. */
+async function showWarningCharts(rule, occ) {
+  const host = $("warn-charts");
+  host.innerHTML = "";
+  if (!rule.values.length) {
+    host.innerHTML = `<p class="hint">This check reads the regen history, not live values: see the Regen history table.</p>`;
+    return;
+  }
+  const end = occ.end ?? Date.now();
+  const from = occ.start - 120000, to = end + 120000;
+  for (const v of rule.values) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const h3 = document.createElement("h3"); h3.textContent = v.name;
+    const c = document.createElement("div"); c.className = "chart";
+    card.append(h3, c);
+    host.appendChild(card);
+    try {
+      const r = await fetch(`/api/series?id=${encodeURIComponent(v.id)}&from=${from}&to=${to}`, { cache: "no-store" });
+      const pts = (await r.json()).points;
+      chart(c, pts.map((p) => p[0]), pts.map((p) => p[1]), {
+        columns: false, empty: "No engine data was synced for this time.", axisFmt: time, band: [occ.start, end],
+        label: (i) => `${time(pts[i][0])} · ${valueText({ ...v, value: pts[i][1] })}`,
+      });
+    } catch (e) { c.innerHTML = `<div class="empty">Hub unreachable.</div>`; }
+  }
+}
+$("warn-close").addEventListener("click", () => $("warn-dialog").close());
+$("warn-dialog").addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); }); // backdrop click
+
+async function loadWarnings() {
+  try {
+    const r = await fetch("/api/warnings", { cache: "no-store" });
+    if (r.ok) { warnData = await r.json(); renderWarnings(); }
+  } catch (e) {}
+}
+
 async function load() {
   try {
     const r = await fetch("/api/summary", { cache: "no-store" });
     if (r.ok) { data = await r.json(); render(); }
+    loadWarnings();
   } catch (e) { $("status-text").textContent = "Hub unreachable, retrying…"; }
 }
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
