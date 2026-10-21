@@ -205,6 +205,12 @@
     <div class="card"><h2 id="gap-title">Miles between regens</h2><p class="hint">Last 20 regens, distance from every phone · hover or tap</p><div class="chart" id="gap-chart"></div></div>
   </section>
 
+  <section class="card">
+    <h2 id="dpf-title">DPF condition</h2>
+    <p class="hint">Exhaust restriction right after each regen, in kPa per 100 l/s of exhaust. Burning removes the soot, so what stays is ash: a rising bar means the filter is filling with ash and needs a clean. · hover or tap</p>
+    <div class="chart" id="dpf-chart"></div>
+  </section>
+
   <section>
     <h2 class="display">Warning history</h2>
     <div class="table-wrap">
@@ -386,6 +392,15 @@ function render() {
     label: (i) => `${fmt(g[i].start)} · ${dist(g[i].gap_m)} · ${mins(g[i])}`,
   });
 
+  const dp = (data.dpf || []).slice(-20);
+  const rate = (r) => r.per_km == null ? "" : ` · then +${(r.per_km * perUnit() / 1000).toFixed(2)} per ${unit}`;
+  const lastRate = dp.length ? dp[dp.length - 1].per_km : null;
+  $("dpf-title").textContent = lastRate == null ? "DPF condition" : `DPF condition · fills ${(lastRate * perUnit() / 1000).toFixed(2)} per ${unit}`;
+  chart($("dpf-chart"), dp.map((r) => r.start), dp.map((r) => r.base), {
+    columns: true, empty: "Appears after a regen followed by a few minutes of driving.",
+    label: (i) => `${fmt(dp[i].start)} · ${dp[i].base.toFixed(1)} kPa${rate(dp[i])} (${dp[i].driver})`,
+  });
+
   $("th-gap").textContent = unit === "km" ? "Km since last" : "Miles since last";
   $("history").innerHTML = data.regens.length ? "" : `<tr><td colspan="5" class="empty">No regens yet. They appear after a phone syncs.</td></tr>`;
   for (const r of data.regens.slice(0, 100)) {
@@ -411,9 +426,9 @@ function render() {
   $("footer").textContent = `Yaris Doctor home hub · ${data.devices.length} phone${data.devices.length === 1 ? "" : "s"} · updated ${new Date(data.now).toLocaleTimeString()}`;
 }
 
-/** Same card as the phone's Overview: "All good", or the open alerts, then the ones seen in the last 7 days. */
+/** Same card as the phone's Overview: "All good", or the open alerts. Recovered ones are in the warning history. */
 function renderHealth(alerts) {
-  const open = alerts.filter((a) => a.end == null), old = alerts.filter((a) => a.end != null);
+  const open = alerts.filter((a) => a.end == null);
   const level = Math.max(0, ...open.map((a) => a.level));
   const h = $("health");
   h.innerHTML = "";
@@ -423,19 +438,15 @@ function renderHealth(alerts) {
   title.append(dot, level === 2 ? "Check the car now" : level ? "Warning" : "All good");
   h.appendChild(title);
   const line = (text, cls) => { const p = document.createElement("p"); p.textContent = text; if (cls) p.className = cls; h.appendChild(p); };
-  const link = (a, text, old) => {
+  const link = (a, text) => {
     const b = document.createElement("button");
-    b.className = "open" + (old ? " old" : "");
+    b.className = "open";
     b.textContent = text;
     b.addEventListener("click", () => openWarning(a));
     h.appendChild(b);
   };
   if (!open.length) line("Every check on the engine data is within range.", "old");
   for (const a of open) link(a, `${a.level === 2 ? "Critical: " : ""}${a.text} (${a.driver})`);
-  if (old.length) {
-    const c = document.createElement("div"); c.className = "caps"; c.textContent = "Seen in the last 7 days"; h.appendChild(c);
-    for (const a of old) link(a, `${fmt(a.start)} · ${a.text} (${a.driver})`, true);
-  }
 }
 
 // ---------- Live data view: every engine value the phones upload, like the phone's All data tab ----------

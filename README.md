@@ -9,6 +9,7 @@ database for the car — so if two people drive it, their trips add up — and s
 - current soot load, distance since the last regen, average distance between regens
 - a "Regenerating · keep driving" banner while a regen is live
 - soot over the last 30 days and distance between regens (hover or tap to read values)
+- DPF condition: exhaust restriction right after each regen (rising = ash building up) and how fast it rises per mile or km
 - regen history with who was driving, and one card per phone
 
 No accounts and no logins: a phone is identified by a random install id plus the driver name set in the app.
@@ -93,7 +94,7 @@ from the hub while at home, so each phone's own screen shows the whole car.
 
 | Method | Path | |
 |---|---|---|
-| `POST` | `/api/sync` | Phone upload: `{device_id, name, samples: [[rowid, t, soot, temp, regen, odo_m]…], regens: [[id, start_t, end_t, odo_start, odo_end, soot_start, soot_end]…]}`, optionally `frames: [[rowid, t, lid, hex]…]`, `alerts: [[id, key, level, text, start_t, end_t]…]`, `rules: [[key, title, level, about, [value names]]…]` and `defs` (the PID table: `[[lid, bit_start, bit_end, len, signed, mul, div, offset, decimals, name, unit, category, enum]…]`). The reply counts what was stored; its `frames` key tells the phone this hub stores frames |
+| `POST` | `/api/sync` | Phone upload: `{device_id, name, samples: [[rowid, t, soot, temp, regen, odo_m]…], regens: [[id, start_t, end_t, odo_start, odo_end, soot_start, soot_end]…]}`, optionally `frames: [[rowid, t, lid, hex]…]`, `alerts: [[id, key, level, text, start_t, end_t]…]`, `rules: [[key, title, level, about, [value names]]…]` `defs` (the PID table: `[[lid, bit_start, bit_end, len, signed, mul, div, offset, decimals, name, unit, category, enum]…]`), `dpf: [[regen_start, base, per_km]…]` (DPF condition per regen, replaces the phone's previous set) and `regens_all: true` (the regens are the phone's whole list: ones it no longer has are deleted). The reply counts what was stored; its `frames` key tells the phone this hub stores frames |
 | `GET` | `/api/export?device=<id>&after=<cursor>` | What every *other* phone logged, so each phone shows the whole car: `{samples: [[device, phone_rowid, t, soot, temp, regen, odo_m]…], regens: [[device, id, start_t, end_t, soot_start, soot_end]…], next, more}`. Samples come 5000 at a time after `cursor` (start at 0, then pass `next` while `more`); regens are always the full list, stale open ones closed |
 | `GET` | `/api/summary` | Everything the Overview shows, as JSON, including `alerts` (open and last 7 days, one per check) |
 | `GET` | `/api/live` | Latest decoded value of every engine PID: `{now, values: [{id, name, unit, category, enum, decimals, t, value}…]}` |

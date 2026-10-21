@@ -169,6 +169,23 @@ class HubTest(unittest.TestCase):
             with self.assertRaises(ValueError, msg=rules):
                 app.ingest(self.db, {"device_id": A, "rules": rules}, 0)
 
+    def test_full_regen_list_drops_rows_the_phone_deleted(self):
+        r1, blip = [1, 10 * MIN, 20 * MIN, 10_000.0, 20_000.0, 80, 10], [2, 30 * MIN, 30 * MIN + 3000, 30_000.0, 30_000.0, 70, 70]
+        self.sync(A, "Alex", drive(A, 0, 40, 0), [r1, blip])
+        self.sync(B, "Sam", (), [[1, 100 * MIN, 110 * MIN, None, None, 75, 12]])
+        # An older phone's later batches send an empty list without the flag: nothing goes
+        self.sync(A, "Alex", (), [])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM regen WHERE device = ?", (A,)).fetchone()[0], 2)
+        app.ingest(self.db, {"device_id": A, "name": "Alex", "regens": [r1], "regens_all": True}, 10**13)
+        self.assertEqual(self.db.execute("SELECT device, id FROM regen ORDER BY device").fetchall(), [(A, 1), (B, 1)])
+
+    def test_dpf_condition_is_stored_per_phone_and_shown(self):
+        app.ingest(self.db, {"device_id": A, "name": "Alex", "dpf": [[10 * MIN, 6.7, 0.144], [50 * MIN, None, None]]}, 0)
+        app.ingest(self.db, {"device_id": A, "name": "Alex", "dpf": [[10 * MIN, 6.5, 0.15]]}, 0)  # replaces the phone's set
+        self.assertEqual(app.summary(self.db, 60 * MIN)["dpf"], [{"start": 10 * MIN, "base": 6.5, "per_km": 0.15, "driver": "Alex"}])
+        with self.assertRaises(ValueError):
+            app.ingest(self.db, {"device_id": A, "dpf": [[10 * MIN, "6.5", None]]}, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

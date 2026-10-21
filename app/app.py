@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS alert(
     start_t INTEGER NOT NULL, end_t INTEGER,
     PRIMARY KEY(device, id));
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS dpf(
+    device TEXT NOT NULL, regen_start INTEGER NOT NULL, base REAL, per_km REAL,
+    PRIMARY KEY(device, regen_start));
 """
 
 write_lock = threading.Lock()  # SQLite takes one writer; uploads are rare, so serialise them
@@ -148,6 +151,10 @@ def ingest(db, body, now_ms):
          _num(r[4], required=True), _num(r[5]))
         for r in _rows(body.get("alerts", []), 6, "alerts")
     ]
+    # DPF condition per regen, worked out on the phone (Db.dpfRows): [regen start, restriction after it, rise per km]
+    dpf = None if body.get("dpf") is None else [
+        (dev, _num(r[0], required=True), _num(r[1], float), _num(r[2], float)) for r in _rows(body["dpf"], 3, "dpf")
+    ]
     defs = _defs(body["defs"]) if body.get("defs") is not None else None
     rules = _rules(body["rules"]) if body.get("rules") is not None else None
     with write_lock, db:
@@ -162,6 +169,13 @@ def ingest(db, body, now_ms):
         db.executemany("INSERT OR IGNORE INTO sample VALUES (?,?,?,?,?,?,?)", samples)
         # Regens change after upload (end_t is set when they finish), so the phone resends them and the latest wins
         db.executemany("INSERT OR REPLACE INTO regen VALUES (?,?,?,?,?,?,?,?)", regens)
+        # regens_all: the phone sent every regen it has, so ones it deleted (engine-stop blips, not burns) go here too
+        if body.get("regens_all") is True:
+            ids = [r[1] for r in regens]
+            db.execute(f"DELETE FROM regen WHERE device = ? AND id NOT IN ({','.join('?' * len(ids))})", (dev, *ids))
+        if dpf is not None:
+            db.execute("DELETE FROM dpf WHERE device = ?", (dev,))
+            db.executemany("INSERT OR REPLACE INTO dpf VALUES (?,?,?,?)", dpf)
         db.execute(
             "INSERT INTO device VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, last_sync = excluded.last_sync",
             (dev, name, now_ms),
@@ -261,7 +275,12 @@ def summary(db, now_ms):
         "regens": regens[::-1],
         "soot_series": soot,
         "devices": devices,
-        "alerts": alerts(db, now_ms - 7 * 86_400_000),
+        # Open ones only, like the phone's Overview: a recovered warning stays in the warning history below
+        "alerts": alerts(db, now_ms),
+        "dpf": [
+            {"start": s, "base": b, "per_km": k, "driver": names.get(d, "?")}
+            for d, s, b, k in db.execute("SELECT device, regen_start, base, per_km FROM dpf WHERE base IS NOT NULL ORDER BY regen_start")
+        ],
     }
 
 
