@@ -11,6 +11,9 @@ database for the car — so if two people drive it, their trips add up — and s
 - soot over the last 30 days and distance between regens (hover or tap to read values)
 - DPF condition: exhaust restriction right after each regen (rising = ash building up) and how fast it rises per mile or km
 - regen history with who was driving, and one card per phone
+- every time chart shades the periods the DPF was regenerating
+
+The dashboard uses the app's look and fonts (Hanken Grotesk and PT Mono, OFL, bundled in `app/fonts` with their licences), so it needs no internet.
 
 No accounts and no logins: a phone is identified by a random install id plus the driver name set in the app.
 **It has no authentication, so keep it on your LAN** — don't expose it to the internet.

@@ -4,173 +4,219 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yaris Doctor Hub</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<!-- DESIGN.md substitutes: Cormorant Garamond for Copernicus, Inter for StyreneB. System fonts take over offline. -->
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  /* The app's fonts, served by the hub (OFL, licences at /fonts/*-OFL.txt). Hanken Grotesk is variable: every weight. */
+  @font-face { font-family: "Hanken Grotesk"; src: url(/fonts/hanken_grotesk.ttf) format("truetype"); font-weight: 100 900; font-display: swap; }
+  @font-face { font-family: "PT Mono"; src: url(/fonts/pt_mono.ttf) format("truetype"); font-weight: 400; font-display: swap; }
+  /* Same tokens as the app's res/values(-night)/colors.xml: cool paper, one signal orange, heavy black type */
   :root {
     color-scheme: light;
-    --primary: #cc785c;
-    --on-primary: #ffffff;
-    --canvas: #faf9f5;
-    --surface-card: #efe9de;
-    --hairline: #e6dfd8;
-    --hairline-soft: #ebe6df;
-    --ink: #141413;
-    --body: #3d3d3a;
-    --muted: #6c6a64;
-    --muted-soft: #8e8b82;
-    --instrument: #181715;
-    --on-instrument: #faf9f5;
-    --on-instrument-soft: #a09d96;
-    --accent-teal: #5db8a6;
-    --footer: #181715;
-    --serif: "Cormorant Garamond", "Tiempos Headline", Garamond, "Times New Roman", serif;
-    --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --primary: #f04a12;
+    --on-primary: #000000;
+    --canvas: #f4f7fe;
+    --surface-card: #fdfdff;
+    --surface-alt: #e4e7ee;
+    --hairline: #c2c4cb;
+    --hairline-soft: #dbdee5;
+    --control-border: #67696f;
+    --ink: #101116;
+    --body: #2b2d33;
+    --muted: #4b4d53;
+    --muted-soft: #67696f;
+    --instrument: #101116;
+    --on-instrument: #f4f7fe;
+    --on-instrument-soft: #a9abb2;
+    --accent-teal: #14a356;
+    --status-warn: #e89b00;
+    --status-crit: #e0203a;
+    --soot-fill: #2b2d35;
+    --chart-grid: #e4e7ee;
+    --sans: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: "PT Mono", ui-monospace, Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
-      --canvas: #181715;
-      --surface-card: #252320;
-      --hairline: #2f2d29;
-      --hairline-soft: #1f1e1b;
-      --ink: #faf9f5;
-      --body: #faf9f5;
-      --muted: #a09d96;
-      --instrument: #252320;
-      --footer: #1f1e1b;
+      --primary: #ff6a2b;
+      --canvas: #050609;
+      --surface-card: #141519;
+      --surface-alt: #26272c;
+      --hairline: #2e3036;
+      --hairline-soft: #1f2026;
+      --control-border: #85868b;
+      --ink: #e9ebf1;
+      --body: #d2d4da;
+      --muted: #a2a3a9;
+      --muted-soft: #8a8b90;
+      --instrument: #1a1b21;
+      --accent-teal: #3ddc84;
+      --status-warn: #ffb81f;
+      --status-crit: #ff4d63;
+      --soot-fill: #30323a;
+      --chart-grid: #24262c;
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --canvas: #181715;
-    --surface-card: #252320;
-    --hairline: #2f2d29;
-    --hairline-soft: #1f1e1b;
-    --ink: #faf9f5;
-    --body: #faf9f5;
-    --muted: #a09d96;
-    --instrument: #252320;
-    --footer: #1f1e1b;
+    --primary: #ff6a2b;
+    --canvas: #050609;
+    --surface-card: #141519;
+    --surface-alt: #26272c;
+    --hairline: #2e3036;
+    --hairline-soft: #1f2026;
+    --control-border: #85868b;
+    --ink: #e9ebf1;
+    --body: #d2d4da;
+    --muted: #a2a3a9;
+    --muted-soft: #8a8b90;
+    --instrument: #1a1b21;
+    --accent-teal: #3ddc84;
+    --status-warn: #ffb81f;
+    --status-crit: #ff4d63;
+    --soot-fill: #30323a;
+    --chart-grid: #24262c;
   }
 
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--canvas); color: var(--body); font: 400 16px/1.55 var(--sans); }
+  body { margin: 0; background: var(--canvas); color: var(--body); font: 400 16px/1.5 var(--sans); }
   .wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
-  h1, h2, .display { font-family: var(--serif); font-weight: 500; color: var(--ink); margin: 0; }
+  h1, h2, h3 { margin: 0; color: var(--ink); }
+  button { font-family: var(--sans); }
+  /* Ui.Type.CAPTION_UPPER: the eyebrow above every block */
+  .caps { font: 400 11px/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  /* Ui.SquareSpan: the brand's full stop, a square on the baseline after the hero word or number */
+  .sq::after { content: ""; display: inline-block; width: 0.16em; height: 0.16em; margin-left: 0.06em; background: var(--sq, var(--primary)); }
 
-  /* top-nav */
-  nav { height: 64px; display: flex; align-items: center; gap: 12px; }
-  nav h1 { font-size: 28px; line-height: 1.2; letter-spacing: -0.3px; }
-  nav .sub { color: var(--muted); font: 500 14px/1.4 var(--sans); }
+  /* top bar */
+  nav { min-height: 64px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 0; }
+  nav h1 { font: 800 22px/1.2 var(--sans); letter-spacing: -0.01em; }
   nav .spacer { flex: 1; }
-  .tabs { display: flex; gap: 4px; }
-  .tab { border: 0; background: transparent; color: var(--muted); font: 500 14px/1.4 var(--sans); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
-  .tab[aria-pressed="true"] { background: var(--surface-card); color: var(--ink); }
+  .tabs, .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 
-  .pill { display: inline-flex; align-items: center; gap: 8px; background: var(--surface-card); color: var(--ink);
-          font: 500 13px/1.4 var(--sans); padding: 4px 12px; border-radius: 9999px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-soft); }
-  .dot.live { background: var(--accent-teal); }
-  .badge-coral { background: var(--primary); color: var(--on-primary); font: 500 12px/1.4 var(--sans);
-                 letter-spacing: 1.5px; text-transform: uppercase; padding: 4px 12px; border-radius: 9999px; }
+  /* Ui.chip: outlined pill, solid signal orange when selected */
+  .tab, .chip { border: 1px solid var(--control-border); background: var(--canvas); color: var(--ink); font: 600 13px/1.4 var(--sans);
+                padding: 0 18px; min-height: 44px; border-radius: 9999px; cursor: pointer; }
+  .tab[aria-pressed="true"], .chip[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  .tab:focus-visible, .chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .views { margin: 4px 0 20px; }
+
+  .pill { display: inline-flex; align-items: center; gap: 8px; background: var(--surface-card); border: 1px solid var(--hairline); color: var(--ink);
+          font: 600 13px/1.4 var(--sans); padding: 6px 12px; border-radius: 9999px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-soft); flex: none; }
+  .dot.live, .dot.ok { background: var(--accent-teal); }
+  .dot.warn { background: var(--status-warn); }
+  .dot.crit { background: var(--status-crit); }
+  .badge-coral { background: var(--primary); color: var(--on-primary); font: 400 11px/1.4 var(--mono); letter-spacing: 0.12em;
+                 text-transform: uppercase; padding: 4px 12px; border-radius: 9999px; white-space: nowrap; }
 
   section { margin-top: 24px; }
-  .card { background: var(--surface-card); border-radius: 12px; padding: 24px; }
-  .callout { background: var(--primary); color: var(--on-primary); border-radius: 12px; padding: 32px; }
-  .callout .display { color: var(--on-primary); font-size: 28px; line-height: 1.2; letter-spacing: -0.3px; margin: 8px 0 4px; }
-  .caps { font: 500 12px/1.4 var(--sans); letter-spacing: 1.5px; text-transform: uppercase; }
+  .card { background: var(--surface-card); border: 1px solid var(--hairline-soft); border-radius: 20px; padding: 20px; }
+  .card h2 { font: 600 18px/1.35 var(--sans); margin-top: 6px; }
+  .card .hint, .hint { color: var(--muted); font-size: 14px; margin: 4px 0 12px; }
 
-  /* product-mockup-card-dark as the instrument panel */
-  .instrument { background: var(--instrument); color: var(--on-instrument); border-radius: 12px; padding: 32px;
-                display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 24px; }
-  .instrument .caps, .instrument .sub { color: var(--on-instrument-soft); }
-  .instrument .value { font-family: var(--serif); font-weight: 500; font-size: 48px; line-height: 1.1; letter-spacing: -1px; margin: 8px 0 4px; color: var(--on-instrument); }
-  .instrument .sub { font-size: 14px; }
+  /* Health: the verdict set huge, ended by a square in the status colour */
+  .health h2 { font: 900 56px/1 var(--sans); letter-spacing: -0.035em; margin-top: 10px; }
+  .health > p { margin: 14px 0 0; color: var(--body); }
+  .health .alert { display: flex; align-items: center; gap: 12px; padding-top: 12px; }
+  .health .alert .dot { width: 10px; height: 10px; }
+  .health button.open { all: unset; cursor: pointer; font: 600 16px/1.35 var(--sans); color: var(--ink); }
+  .health button.open:hover { text-decoration: underline; }
+  .health button.open:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .health .caps { margin-top: 2px; }
+  .health hr { border: 0; border-top: 1px solid var(--hairline); margin: 20px 0 0; }
 
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 24px; }
-  .card h2, section > h2 { font: 500 18px/1.4 var(--sans); color: var(--ink); }
-  section > h2.display { font-family: var(--serif); font-weight: 500; font-size: 36px; line-height: 1.15; letter-spacing: -0.5px; }
-  .card .hint { color: var(--muted); font-size: 14px; margin: 2px 0 12px; }
+  /* Live regen: the one orange field on the Overview */
+  .callout { background: var(--primary); color: var(--on-primary); border-radius: 20px; padding: 24px; }
+  .callout .caps { color: var(--on-primary); }
+  .callout .display { font: 800 26px/1.15 var(--sans); letter-spacing: -0.015em; margin: 8px 0 4px; }
+  .callout #callout-text { font-size: 14px; }
+
+  /* Instrument card: dark in both themes, soot fills it from the bottom (SootView) */
+  .instrument { position: relative; overflow: hidden; background: var(--instrument); color: var(--on-instrument); border-radius: 20px;
+                height: 232px; padding: 22px 24px; display: flex; flex-direction: column; }
+  .instrument > * { position: relative; }
+  .instrument .fill { position: absolute; inset: auto 0 0 0; height: 0; background: var(--soot-fill); transition: height 1.5s cubic-bezier(0.2, 0, 0, 1); }
+  .instrument .caps, .stat .caps, .instrument .sub, .stat .sub { color: var(--on-instrument-soft); }
+  .instrument .numeral { margin-top: auto; font: 900 80px/1 var(--sans); letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+  .instrument .sub, .stat .sub { font-size: 14px; }
+  .instrument .sub { margin-top: 8px; }
+  .numeral.pulse::after { animation: pulse 1.2s ease-in-out infinite alternate; }
+  @keyframes pulse { to { opacity: 0.45; } }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 12px; }
+  .stat { background: var(--instrument); color: var(--on-instrument); border-radius: 20px; padding: 18px 20px; min-height: 120px; }
+  .stat .value { font: 800 32px/1.05 var(--sans); letter-spacing: -0.02em; margin: 14px 0 6px; }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; }
+  section > h2.display { font: 800 26px/1.15 var(--sans); letter-spacing: -0.015em; margin: 8px 0 12px; }
 
   .chart { position: relative; }
   .chart svg { display: block; width: 100%; height: 220px; overflow: visible; touch-action: pan-y; }
-  .chart .readout { font: 500 13px/1.4 var(--sans); color: var(--ink); min-height: 18px; margin-bottom: 4px; }
+  .chart svg text { font-family: var(--mono); font-size: 11px; }
+  .chart .readout { font: 600 13px/1.4 var(--sans); color: var(--ink); min-height: 18px; margin-bottom: 4px; }
+  .chart .legend { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .chart .legend i { width: 12px; height: 12px; border-radius: 2px; background: var(--primary); opacity: 0.25; }
   .tip { position: absolute; pointer-events: none; background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline);
-         border-radius: 8px; padding: 6px 10px; font: 500 13px/1.4 var(--sans); white-space: nowrap; transform: translate(-50%, -110%); display: none; }
+         border-radius: 8px; padding: 6px 10px; font: 600 13px/1.4 var(--sans); white-space: nowrap; transform: translate(-50%, -110%); display: none; }
   .empty { color: var(--muted); font-size: 14px; padding: 48px 0; text-align: center; }
 
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th { text-align: left; color: var(--muted); font: 500 12px/1.4 var(--sans); letter-spacing: 1.5px; text-transform: uppercase; padding: 8px 12px 8px 0; }
+  th { text-align: left; color: var(--muted); font: 400 11px/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; padding: 8px 12px 8px 0; }
   td { padding: 12px 12px 12px 0; border-top: 1px solid var(--hairline-soft); color: var(--body); vertical-align: middle; }
-  td.when { color: var(--ink); font-weight: 500; }
+  td.when { color: var(--ink); font-weight: 600; }
   .table-wrap { overflow-x: auto; }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-  .tile { background: var(--canvas); border: 1px solid var(--hairline); border-radius: 12px; padding: 20px; }
-  .tile h3 { margin: 0 0 4px; font: 500 16px/1.4 var(--sans); color: var(--ink); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface-card); border: 1px solid var(--hairline-soft); border-radius: 20px; padding: 20px; }
+  .tile h3 { margin: 0 0 4px; font: 600 16px/1.35 var(--sans); }
   .tile p { margin: 0; color: var(--muted); font-size: 14px; }
 
-  /* view chips: the phone's Overview / All data tabs */
-  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
-  .chip { border: 0; background: var(--surface-card); color: var(--ink); font: 500 13px/1.4 var(--sans); padding: 8px 14px;
-          border-radius: 9999px; cursor: pointer; min-height: 36px; }
-  .chip[aria-pressed="true"] { background: var(--ink); color: var(--canvas); }
-  .views { margin: 8px 0 16px; }
-
-  .health h2 { display: flex; align-items: center; gap: 10px; }
-  .health .dot { width: 10px; height: 10px; background: var(--accent-teal); }
-  .health .dot.warn { background: var(--primary); }
-  .health p { margin: 8px 0 0; color: var(--ink); font-size: 14px; }
-  .health p.old { color: var(--muted); }
-  .health .caps { color: var(--muted); margin-top: 16px; }
-
-  .search { width: 100%; font: 400 16px/1.4 var(--sans); color: var(--ink); background: var(--canvas); border: 1px solid var(--hairline);
-            border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
+  .search { width: 100%; font: 400 16px/1.4 var(--sans); color: var(--ink); background: var(--surface-card); border: 1px solid var(--control-border);
+            border-radius: 9999px; padding: 12px 20px; margin: 12px 0; }
   .search::placeholder { color: var(--muted); }
+  .search:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
   .values { margin-top: 8px; }
   .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hairline-soft); cursor: pointer; }
-  .row .name { flex: 1; color: var(--ink); }
-  .row .sub { display: block; color: var(--muted); font-size: 14px; }
-  .row .val { color: var(--ink); font-weight: 500; text-align: right; white-space: nowrap; }
+  .row .name { flex: 1; color: var(--ink); font-weight: 600; }
+  .row .sub { display: block; color: var(--muted); font: 400 11px/1.4 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; margin-top: 2px; }
+  .row .val { color: var(--ink); font-weight: 800; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .row .age { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
   .row:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
   /* Warnings: clickable rows and the detail dialog */
   tr.clickable { cursor: pointer; }
-  tr.clickable:hover td { background: var(--surface-card); }
+  tr.clickable:hover td { background: var(--surface-alt); }
   tr.clickable:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-  .health button.open { all: unset; display: block; cursor: pointer; margin: 8px 0 0; color: var(--ink); font-size: 14px; }
-  .health button.open.old { color: var(--muted); margin-top: 6px; }
-  .health button.open:hover { text-decoration: underline; }
-  .health button.open:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-  dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); border: 1px solid var(--hairline); border-radius: 12px;
+  dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); border: 1px solid var(--hairline); border-radius: 20px;
            padding: 24px; background: var(--canvas); color: var(--body); }
-  dialog::backdrop { background: rgb(0 0 0 / 0.45); }
-  dialog h2 { font-family: var(--serif); font-weight: 500; font-size: 28px; line-height: 1.2; color: var(--ink); margin: 0; flex: 1; }
+  dialog::backdrop { background: rgb(0 0 0 / 0.55); }
+  dialog h2 { font: 800 26px/1.15 var(--sans); letter-spacing: -0.015em; margin: 0; flex: 1; }
   dialog .head { display: flex; align-items: center; gap: 12px; }
-  dialog .close { border: 1px solid var(--hairline); background: var(--canvas); color: var(--ink); border-radius: 9999px;
-                  width: 36px; height: 36px; font-size: 18px; cursor: pointer; }
+  /* Ui.iconButton: 44px outline circle */
+  dialog .close { border: 1px solid var(--control-border); background: var(--surface-card); color: var(--ink); border-radius: 9999px;
+                  width: 44px; height: 44px; font-size: 20px; cursor: pointer; flex: none; }
+  dialog .close:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   dialog .about { margin: 12px 0 0; }
-  dialog .caps { color: var(--muted); margin: 20px 0 8px; }
+  dialog > .caps { margin: 20px 0 8px; }
   dialog .card { margin-top: 12px; padding: 16px; }
-  dialog .card h3 { margin: 0 0 4px; font: 500 14px/1.4 var(--sans); color: var(--ink); }
+  dialog .card h3 { margin: 0 0 4px; font: 600 14px/1.4 var(--sans); }
 
-  footer { background: var(--footer); color: var(--on-instrument-soft); margin-top: 48px; padding: 32px 0; font-size: 14px; }
+  footer { background: var(--instrument); color: var(--on-instrument-soft); margin-top: 48px; padding: 32px 0; font: 400 11px/1.4 var(--mono);
+           letter-spacing: 0.12em; text-transform: uppercase; }
 
   @media (max-width: 600px) {
-    nav .sub { display: none; }
-    .instrument { padding: 24px; }
-    .instrument .value { font-size: 36px; }
+    .health h2 { font-size: 44px; }
+    .instrument .numeral { font-size: 72px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .instrument .fill { transition: none; }
+    .numeral.pulse::after { animation: none; }
   }
 </style>
 </head>
 <body>
 <div class="wrap">
   <nav>
-    <h1>Yaris Doctor</h1><span class="sub">Home hub</span>
+    <h1 class="sq">Yaris Doctor</h1><span class="caps">Home hub</span>
     <span class="spacer"></span>
     <div class="tabs" role="group" aria-label="Distance units">
       <button class="tab" data-unit="mi">Miles</button>
@@ -186,32 +232,39 @@
   <div id="view-overview">
   <span class="pill" id="status"><span class="dot" id="status-dot"></span><span id="status-text">Loading…</span></span>
 
-  <section class="card health" id="health" aria-live="polite"></section>
+  <section class="health" id="health" aria-live="polite"></section>
 
   <section id="callout" class="callout" hidden>
-    <div class="caps">Regenerating</div>
+    <div class="caps">Regen running</div>
     <div class="display">Keep driving</div>
     <div id="callout-text"></div>
   </section>
 
-  <section class="instrument" aria-label="Current state">
-    <div><div class="caps">Soot load</div><div class="value" id="soot">—</div><div class="sub" id="soot-sub"></div></div>
-    <div><div class="caps">Since last regen</div><div class="value" id="since">—</div><div class="sub" id="since-sub"></div></div>
-    <div><div class="caps">Regens logged</div><div class="value" id="count">—</div><div class="sub" id="count-sub"></div></div>
+  <section class="instrument" aria-label="Soot load">
+    <div class="fill" id="soot-fill"></div>
+    <div class="caps">Soot load</div>
+    <div class="numeral sq" id="soot">—</div>
+    <div class="sub" id="soot-sub"></div>
   </section>
+  <div class="stats" aria-label="Regens">
+    <div class="stat"><div class="caps">Since last regen</div><div class="value" id="since">—</div><div class="sub" id="since-sub"></div></div>
+    <div class="stat"><div class="caps">Regens logged</div><div class="value" id="count">—</div><div class="sub" id="count-sub"></div></div>
+  </div>
 
   <section class="grid2">
-    <div class="card"><h2>Soot load</h2><p class="hint">Last 30 days, all phones · hover or tap to read</p><div class="chart" id="soot-chart"></div></div>
-    <div class="card"><h2 id="gap-title">Miles between regens</h2><p class="hint">Last 20 regens, distance from every phone · hover or tap</p><div class="chart" id="gap-chart"></div></div>
+    <div class="card"><div class="caps">Soot · last 30 days</div><h2>Soot trend</h2><p class="hint">All phones · hover or tap to read</p><div class="chart" id="soot-chart"></div></div>
+    <div class="card"><div class="caps">Regens · last 20</div><h2 id="gap-title">Miles between regens</h2><p class="hint">Distance from every phone · hover or tap</p><div class="chart" id="gap-chart"></div></div>
   </section>
 
   <section class="card">
+    <div class="caps">After each regen · last 20</div>
     <h2 id="dpf-title">DPF condition</h2>
     <p class="hint">Exhaust restriction right after each regen, in kPa per 100 l/s of exhaust. Burning removes the soot, so what stays is ash: a rising bar means the filter is filling with ash and needs a clean. · hover or tap</p>
     <div class="chart" id="dpf-chart"></div>
   </section>
 
   <section>
+    <div class="caps">Warnings</div>
     <h2 class="display">Warning history</h2>
     <div class="table-wrap">
       <table>
@@ -222,6 +275,7 @@
   </section>
 
   <section>
+    <div class="caps">Regens</div>
     <h2 class="display">Regen history</h2>
     <div class="table-wrap">
       <table>
@@ -232,13 +286,14 @@
   </section>
 
   <section>
+    <div class="caps">Devices</div>
     <h2 class="display">Phones</h2>
     <div class="tiles" id="devices"></div>
   </section>
   </div>
 
   <div id="view-live" hidden>
-    <p class="hint" id="live-head" style="color: var(--muted); margin: 0;">Loading…</p>
+    <p class="hint" id="live-head" style="margin: 0;">Loading…</p>
     <input class="search" id="live-search" type="search" placeholder="Search values" aria-label="Search values">
     <div class="chips" id="live-cats" role="group" aria-label="Category"></div>
     <div class="values" id="live-rows"></div>
@@ -279,7 +334,8 @@ function niceMax(v) {
   return [1, 2, 2.5, 5, 10].find((s) => s * mag >= v) * mag;
 }
 
-/** Single-series chart: coral line over time, or coral columns by index. Hover/tap shows a tooltip. */
+/** Single-series chart: orange line over time, or orange columns by index. Hover/tap shows a tooltip.
+ *  Line charts shade every regen from the summary behind the data, and `band` = [t0, t1] (the warning's span). */
 function chart(host, xs, ys, { columns, label, empty, axisFmt = day, band }) {
   host.innerHTML = "";
   if (!ys.length) { host.innerHTML = `<div class="empty">${empty}</div>`; return; }
@@ -303,16 +359,21 @@ function chart(host, xs, ys, { columns, label, empty, axisFmt = day, band }) {
 
   for (const f of [0, 0.5, 1]) {
     const at = yMin + (yMax - yMin) * f;
-    if (f > 0) el("line", { x1: L, x2: W - R, y1: y(at), y2: y(at), stroke: css("--hairline"), "stroke-width": 1 }, svg);
-    el("text", { x: 0, y: y(at) + 4, fill: css("--muted-soft"), "font-size": 11, "font-family": "Inter, sans-serif" }, svg).textContent = +at.toPrecision(3);
+    if (f > 0) el("line", { x1: L, x2: W - R, y1: y(at), y2: y(at), stroke: css("--chart-grid"), "stroke-width": 1 }, svg);
+    el("text", { x: 0, y: y(at) + 4, fill: css("--muted-soft") }, svg).textContent = +at.toPrecision(3);
   }
-  el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: css("--muted-soft"), "stroke-width": 1 }, svg);
-  // band = [t0, t1]: shade when the warning was active (line charts only)
-  if (band && !columns && xs.length > 1 && xs.at(-1) > xs[0]) {
+  el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: css("--hairline"), "stroke-width": 1 }, svg);
+  const legend = [];
+  if (!columns && xs.length > 1 && xs.at(-1) > xs[0]) {
     const tx = (t) => Math.min(W - R, Math.max(L, L + (W - L - R) * (t - xs[0]) / (xs.at(-1) - xs[0])));
-    el("rect", { x: tx(band[0]), y: T, width: Math.max(2, tx(band[1]) - tx(band[0])), height: H - B - T, fill: css("--primary"), opacity: 0.15 }, svg);
+    const shade = (t0, t1, color, opacity) => el("rect", { x: tx(t0), y: T, width: Math.max(2, tx(t1) - tx(t0)), height: H - B - T, fill: css(color), opacity }, svg);
+    // Regens (merged across phones) overlapping the chart; an open one runs to the chart's end
+    const regens = ((data && data.regens) || []).filter((r) => r.start <= xs.at(-1) && (r.end ?? Infinity) >= xs[0]);
+    for (const r of regens) shade(r.start, r.end ?? xs.at(-1), "--primary", 0.14);
+    if (regens.length) legend.push(["--primary", 0.25, "Regen"]);
+    if (band) { shade(band[0], band[1], "--muted-soft", 0.22); legend.push(["--muted-soft", 0.4, "Warning active"]); }
   }
-  const axis = (t, anchor, ax) => (el("text", { x: ax, y: H - 6, fill: css("--muted-soft"), "font-size": 11, "text-anchor": anchor, "font-family": "Inter, sans-serif" }, svg).textContent = axisFmt(t));
+  const axis = (t, anchor, ax) => (el("text", { x: ax, y: H - 6, fill: css("--muted-soft"), "text-anchor": anchor }, svg).textContent = axisFmt(t));
   axis(xs[0], "start", L);
   if (xs.length > 1) axis(xs.at(-1), "end", W - R);
 
@@ -326,11 +387,19 @@ function chart(host, xs, ys, { columns, label, empty, axisFmt = day, band }) {
     });
   } else {
     el("path", { d: ys.map((v, i) => `${i ? "L" : "M"}${x(i)},${y(v)}`).join(" "), fill: "none", stroke: css("--primary"),
-                 "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+                 "stroke-width": 2.5, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
   }
   const cross = el("line", { y1: T, y2: H - B, stroke: css("--muted-soft"), "stroke-width": 1, visibility: "hidden" }, svg);
   const ring = el("circle", { r: 6, fill: css("--surface-card"), visibility: columns ? "hidden" : "visible", cx: x(ys.length - 1), cy: y(ys.at(-1)) }, svg);
   const dot = el("circle", { r: 4, fill: css("--ink"), visibility: columns ? "hidden" : "visible", cx: x(ys.length - 1), cy: y(ys.at(-1)) }, svg);
+
+  for (const [color, opacity, text] of legend) {
+    const k = document.createElement("div");
+    k.className = "legend caps";
+    k.innerHTML = `<i style="background: var(${color}); opacity: ${opacity}"></i>`;
+    k.append(text);
+    host.appendChild(k);
+  }
 
   // Hit target is the whole plot, bigger than any mark
   const hit = el("rect", { x: L, y: 0, width: W - L - R, height: H - B, fill: "transparent" }, svg);
@@ -374,6 +443,8 @@ function render() {
   if (running && last) $("callout-text").textContent = `DPF ${last.temp ?? "?"}°C · soot ${last.soot ?? "?"}% · ${Math.round((data.now - running.start) / 60000)} min so far · ${running.drivers.join(", ")}`;
 
   $("soot").textContent = last && last.soot != null ? `${last.soot}%` : "—";
+  $("soot-fill").style.height = `${Math.min(100, Math.max(0, (last && last.soot) || 0))}%`;
+  $("soot").classList.toggle("pulse", !!(running && last && last.live)); // the square breathes while a regen burns
   $("soot-sub").textContent = last ? (last.live ? "now" : `at ${fmt(last.t)}`) : "no readings yet";
   $("since").textContent = dist(data.since_regen_m);
   $("since-sub").textContent = data.avg_gap_m == null ? "average after two regens" : `avg ${dist(data.avg_gap_m)} between`;
@@ -426,27 +497,45 @@ function render() {
   $("footer").textContent = `Yaris Doctor home hub · ${data.devices.length} phone${data.devices.length === 1 ? "" : "s"} · updated ${new Date(data.now).toLocaleTimeString()}`;
 }
 
-/** Same card as the phone's Overview: "All good", or the open alerts. Recovered ones are in the warning history. */
+/** Status pill with a dot in a status colour: critical stays red, apart from the brand orange. */
+function statusPill(level, text) {
+  const p = document.createElement("span");
+  p.className = "pill";
+  p.innerHTML = `<span class="dot ${level}"></span>`;
+  p.append(text);
+  return p;
+}
+const critical = () => statusPill("crit", "Critical");
+
+/** Same as the phone's Overview: the verdict set huge and ended by a square in the status colour, then the open alerts. */
 function renderHealth(alerts) {
   const open = alerts.filter((a) => a.end == null);
   const level = Math.max(0, ...open.map((a) => a.level));
   const h = $("health");
-  h.innerHTML = "";
+  h.innerHTML = `<div class="caps">Health</div>`;
   const title = document.createElement("h2");
-  const dot = document.createElement("span");
-  dot.className = "dot" + (level ? " warn" : "");
-  title.append(dot, level === 2 ? "Check the car now" : level ? "Warning" : "All good");
+  title.className = "sq";
+  title.style.setProperty("--sq", `var(${level === 2 ? "--status-crit" : level ? "--status-warn" : "--accent-teal"})`);
+  title.textContent = level === 2 ? "Check the car now" : level ? "Warning" : "All good";
   h.appendChild(title);
-  const line = (text, cls) => { const p = document.createElement("p"); p.textContent = text; if (cls) p.className = cls; h.appendChild(p); };
-  const link = (a, text) => {
+  if (!open.length) { const p = document.createElement("p"); p.textContent = "No warnings right now."; h.appendChild(p); }
+  for (const a of open) {
+    const row = document.createElement("div");
+    row.className = "alert";
     const b = document.createElement("button");
     b.className = "open";
-    b.textContent = text;
+    b.textContent = `${a.level === 2 ? "Critical: " : ""}${a.text}`;
     b.addEventListener("click", () => openWarning(a));
-    h.appendChild(b);
-  };
-  if (!open.length) line("Every check on the engine data is within range.", "old");
-  for (const a of open) link(a, `${a.level === 2 ? "Critical: " : ""}${a.text} (${a.driver})`);
+    const when = document.createElement("div");
+    when.className = "caps";
+    when.textContent = `${fmt(a.start)} · ${a.driver}`;
+    const col = document.createElement("div");
+    col.append(b, when);
+    row.innerHTML = `<span class="dot ${a.level === 2 ? "crit" : "warn"}"></span>`;
+    row.appendChild(col);
+    h.appendChild(row);
+  }
+  h.appendChild(document.createElement("hr"));
 }
 
 // ---------- Live data view: every engine value the phones upload, like the phone's All data tab ----------
@@ -566,7 +655,7 @@ function renderWarnings() {
     const rule = ruleOf(a.key);
     const cells = [fmt(a.start), `${rule.title} · ${a.text}`, lasted(a), a.driver];
     cells.forEach((c, k) => { const td = document.createElement("td"); td.textContent = c; if (!k) td.className = "when"; tr.appendChild(td); });
-    if (a.level === 2) { const b = document.createElement("span"); b.className = "badge-coral"; b.textContent = "Critical"; tr.children[1].prepend(b, " "); }
+    if (a.level === 2) tr.children[1].prepend(critical(), " ");
     tr.addEventListener("click", () => openWarning(a));
     tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openWarning(a); } });
     body.appendChild(tr);
@@ -578,10 +667,7 @@ function openWarning(a) {
   const rule = ruleOf(a.key);
   $("warn-title").textContent = rule.title;
   $("warn-level").innerHTML = "";
-  const badge = document.createElement("span");
-  badge.className = rule.level === 2 ? "badge-coral" : "pill";
-  badge.textContent = rule.level === 2 ? "Critical" : "Warning";
-  $("warn-level").appendChild(badge);
+  $("warn-level").appendChild(rule.level === 2 ? critical() : statusPill("warn", "Warning"));
   $("warn-about").textContent = rule.about || "No description from the phone yet. It arrives with the next sync of the updated app.";
   const times = (warnData ? warnData.history : []).filter((h) => h.key === a.key);
   if (!times.some((h) => h.start === a.start)) times.unshift(a);

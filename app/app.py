@@ -26,6 +26,9 @@ HEX_RE = re.compile(r"^(?:[0-9A-F]{2}){1,64}$")
 LID_RE = re.compile(r"^[0-9A-F]{2}$")
 KEY_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 PID_ID_RE = re.compile(r"^[0-9A-F]{2}\.\d{1,3}$")
+# The app's fonts (OFL, licences beside them); a fixed list, so no path from the request reaches the filesystem
+FONTS = {"/fonts/hanken_grotesk.ttf": "font/ttf", "/fonts/pt_mono.ttf": "font/ttf",
+         "/fonts/HankenGrotesk-OFL.txt": "text/plain; charset=utf-8", "/fonts/PTMono-OFL.txt": "text/plain; charset=utf-8"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS device(id TEXT PRIMARY KEY, name TEXT NOT NULL, last_sync INTEGER NOT NULL);
@@ -457,6 +460,8 @@ class Handler(BaseHTTPRequestHandler):
                 db.close()
         elif self.path == "/icon.svg":  # app icon, e.g. for a ZimaOS / CasaOS dashboard tile
             self._send(200, (HERE / "icon.svg").read_bytes(), "image/svg+xml")
+        elif self.path in FONTS:  # bundled so the dashboard needs no internet on the LAN
+            self._send(200, (HERE / "fonts" / self.path[7:]).read_bytes(), FONTS[self.path])
         elif self.path == "/health":
             self._send(200, {"ok": True})
         else:
