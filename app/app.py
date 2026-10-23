@@ -160,7 +160,14 @@ def ingest(db, body, now_ms):
     ]
     defs = _defs(body["defs"]) if body.get("defs") is not None else None
     rules = _rules(body["rules"]) if body.get("rules") is not None else None
+    # Trips the user deleted on the phone: [from, to] time windows (ms, inclusive) of this phone's rows to drop
+    deleted = [(_num(r[0], required=True), _num(r[1], required=True)) for r in _rows(body.get("deleted", []), 2, "deleted")]
+    removed = 0
     with write_lock, db:
+        for a, b in deleted:
+            # A warning still open stays, as on the phone, which keeps it and won't resend it unless it changes
+            for table, cond in (("sample", "t"), ("frame", "t"), ("alert", "end_t IS NOT NULL AND start_t"), ("regen", "start_t")):
+                removed += db.execute(f"DELETE FROM {table} WHERE device = ? AND {cond} BETWEEN ? AND ?", (dev, a, b)).rowcount
         db.executemany("INSERT OR IGNORE INTO frame VALUES (?,?,?,?,?)", frames)
         # Alerts gain an end time and new text after upload, so the latest copy wins, like regens
         db.executemany("INSERT OR REPLACE INTO alert VALUES (?,?,?,?,?,?,?)", alerts)
@@ -183,8 +190,8 @@ def ingest(db, body, now_ms):
             "INSERT INTO device VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, last_sync = excluded.last_sync",
             (dev, name, now_ms),
         )
-    # "frames" in the reply tells the phone this hub stores them (an older hub would silently drop them)
-    return {"ok": True, "samples": len(samples), "regens": len(regens), "frames": len(frames), "alerts": len(alerts)}
+    # "frames" in the reply tells the phone this hub stores them (an older hub would silently drop them); "deleted" that it took the deletes
+    return {"ok": True, "samples": len(samples), "regens": len(regens), "frames": len(frames), "alerts": len(alerts), "deleted": removed}
 
 
 # ---------- summary for the dashboard ----------

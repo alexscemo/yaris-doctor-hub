@@ -186,6 +186,25 @@ class HubTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             app.ingest(self.db, {"device_id": A, "dpf": [[10 * MIN, "6.5", None]]}, 0)
 
+    def test_deleted_trips_drop_only_that_phones_rows_in_range(self):
+        self.sync(A, "Alex", drive(A, 0, 20, 0) + drive(A, 60 * MIN, 10, 20_000.0, first_rowid=21),
+                  [[1, 5 * MIN, 9 * MIN, 5_000.0, 9_000.0, 80, 10], [2, 62 * MIN, 66 * MIN, None, None, 70, 9]])
+        self.sync(B, "Sam", drive(B, 0, 20, 0))
+        app.ingest(self.db, {"device_id": A, "name": "Alex",
+                             "frames": [[1, 3 * MIN, "0C", "0BB8"], [2, 61 * MIN, "0C", "0BB8"]],
+                             "alerts": [[1, "soot_floor", 1, "x", 4 * MIN, 6 * MIN], [2, "regen_frequent", 1, "y", 9 * MIN, None]]}, 10**13)
+        reply = app.ingest(self.db, {"device_id": A, "name": "Alex", "deleted": [[0, 21 * MIN]]}, 10**13)
+        self.assertEqual(reply["deleted"], 20 + 1 + 1 + 1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM sample WHERE device = ?", (A,)).fetchone()[0], 10)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM sample WHERE device = ?", (B,)).fetchone()[0], 20)
+        self.assertEqual(self.db.execute("SELECT id FROM regen WHERE device = ?", (A,)).fetchall(), [(2,)])
+        self.assertEqual(self.db.execute("SELECT phone_rowid FROM frame").fetchall(), [(2,)])
+        self.assertEqual(self.db.execute("SELECT id FROM alert").fetchall(), [(2,)], "an open warning stays")
+        self.assertEqual(self.sync(A, "Alex")["deleted"], 0)
+        for bad in ([[0]], [["0", 1]], "all"):
+            with self.assertRaises(ValueError):
+                app.ingest(self.db, {"device_id": A, "deleted": bad}, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
