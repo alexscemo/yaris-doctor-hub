@@ -128,6 +128,12 @@ def _rules(value):
     return out
 
 
+def _sample_top(db):
+    """Highest sample rowid ever used: the current maximum, or the one saved before deletes took the newest rows."""
+    saved = db.execute("SELECT v FROM meta WHERE k = 'sample_top'").fetchone()
+    return max(db.execute("SELECT COALESCE(MAX(rowid), 0) FROM sample").fetchone()[0], int(saved[0]) if saved else 0)
+
+
 def ingest(db, body, now_ms):
     if not isinstance(body, dict):
         raise ValueError("body must be a JSON object")
@@ -164,10 +170,14 @@ def ingest(db, body, now_ms):
     deleted = [(_num(r[0], required=True), _num(r[1], required=True)) for r in _rows(body.get("deleted", []), 2, "deleted")]
     removed = 0
     with write_lock, db:
+        if deleted:
+            # Remember the highest sample rowid before deleting: the phones' export cursor relies on it never being handed out again
+            db.execute("INSERT INTO meta VALUES ('sample_top', ?) ON CONFLICT(k) DO UPDATE SET v = MAX(CAST(v AS INTEGER), CAST(excluded.v AS INTEGER))",
+                       (str(_sample_top(db)),))
         for a, b in deleted:
-            # A warning still open stays, as on the phone, which keeps it and won't resend it unless it changes
-            for table, cond in (("sample", "t"), ("frame", "t"), ("alert", "end_t IS NOT NULL AND start_t"), ("regen", "start_t")):
-                removed += db.execute(f"DELETE FROM {table} WHERE device = ? AND {cond} BETWEEN ? AND ?", (dev, a, b)).rowcount
+            # Open alerts go too: the phone keeps its open ones and resends them in this same request (inserted below)
+            for table, col in (("sample", "t"), ("frame", "t"), ("alert", "start_t"), ("regen", "start_t")):
+                removed += db.execute(f"DELETE FROM {table} WHERE device = ? AND {col} BETWEEN ? AND ?", (dev, a, b)).rowcount
         db.executemany("INSERT OR IGNORE INTO frame VALUES (?,?,?,?,?)", frames)
         # Alerts gain an end time and new text after upload, so the latest copy wins, like regens
         db.executemany("INSERT OR REPLACE INTO alert VALUES (?,?,?,?,?,?,?)", alerts)
@@ -176,7 +186,10 @@ def ingest(db, body, now_ms):
         if rules is not None:
             db.execute("INSERT OR REPLACE INTO meta VALUES ('rules', ?)", (json.dumps(rules),))
         # Re-sent rows are ignored, so a phone that lost our reply can simply upload again
-        db.executemany("INSERT OR IGNORE INTO sample VALUES (?,?,?,?,?,?,?)", samples)
+        # Rowids set here, above any ever used, so rows after a delete still sort after every export cursor
+        top = _sample_top(db)
+        db.executemany("INSERT OR IGNORE INTO sample(rowid, device, phone_rowid, t, soot, temp, regen, odo_m) VALUES (?,?,?,?,?,?,?,?)",
+                       [(top + 1 + i, *r) for i, r in enumerate(samples)])
         # Regens change after upload (end_t is set when they finish), so the phone resends them and the latest wins
         db.executemany("INSERT OR REPLACE INTO regen VALUES (?,?,?,?,?,?,?,?)", regens)
         # regens_all: the phone sent every regen it has, so ones it deleted (engine-stop blips, not burns) go here too

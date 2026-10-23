@@ -193,8 +193,10 @@ class HubTest(unittest.TestCase):
         app.ingest(self.db, {"device_id": A, "name": "Alex",
                              "frames": [[1, 3 * MIN, "0C", "0BB8"], [2, 61 * MIN, "0C", "0BB8"]],
                              "alerts": [[1, "soot_floor", 1, "x", 4 * MIN, 6 * MIN], [2, "regen_frequent", 1, "y", 9 * MIN, None]]}, 10**13)
-        reply = app.ingest(self.db, {"device_id": A, "name": "Alex", "deleted": [[0, 21 * MIN]]}, 10**13)
-        self.assertEqual(reply["deleted"], 20 + 1 + 1 + 1)
+        # The phone kept its open warning and resends it with the deletes
+        reply = app.ingest(self.db, {"device_id": A, "name": "Alex", "deleted": [[0, 21 * MIN]],
+                                     "alerts": [[2, "regen_frequent", 1, "y", 9 * MIN, None]]}, 10**13)
+        self.assertEqual(reply["deleted"], 20 + 1 + 2 + 1)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM sample WHERE device = ?", (A,)).fetchone()[0], 10)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM sample WHERE device = ?", (B,)).fetchone()[0], 20)
         self.assertEqual(self.db.execute("SELECT id FROM regen WHERE device = ?", (A,)).fetchall(), [(2,)])
@@ -204,6 +206,15 @@ class HubTest(unittest.TestCase):
         for bad in ([[0]], [["0", 1]], "all"):
             with self.assertRaises(ValueError):
                 app.ingest(self.db, {"device_id": A, "deleted": bad}, 0)
+
+    def test_rows_after_a_delete_still_reach_phones_past_the_export_cursor(self):
+        self.sync(A, "Alex", drive(A, 0, 10, 0))
+        self.sync(A, "Alex", drive(A, 60 * MIN, 10, 20_000.0, first_rowid=11))
+        cursor = app.export(self.db, B, 0, 10**13)["next"]  # Sam's phone has pulled everything
+        app.ingest(self.db, {"device_id": A, "name": "Alex", "deleted": [[60 * MIN, 72 * MIN]]}, 10**13)  # Alex's newest trip
+        self.sync(A, "Alex", drive(A, 100 * MIN, 5, 30_000.0, first_rowid=21))
+        got = app.export(self.db, B, cursor, 10**13)["samples"]
+        self.assertEqual([r[1] for r in got], [21, 22, 23, 24, 25], "new rows sort after the cursor, not in the deleted rows' place")
 
 
 if __name__ == "__main__":
