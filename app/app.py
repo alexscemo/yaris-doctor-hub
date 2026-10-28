@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS dpf(
     device TEXT NOT NULL, regen_start INTEGER NOT NULL, base REAL, per_km REAL,
     PRIMARY KEY(device, regen_start));
+CREATE TABLE IF NOT EXISTS deleted(device TEXT NOT NULL, from_t INTEGER NOT NULL, to_t INTEGER NOT NULL, PRIMARY KEY(device, from_t, to_t));
 """
 
 write_lock = threading.Lock()  # SQLite takes one writer; uploads are rare, so serialise them
@@ -174,6 +175,8 @@ def ingest(db, body, now_ms):
             # Remember the highest sample rowid before deleting: the phones' export cursor relies on it never being handed out again
             db.execute("INSERT INTO meta VALUES ('sample_top', ?) ON CONFLICT(k) DO UPDATE SET v = MAX(CAST(v AS INTEGER), CAST(excluded.v AS INTEGER))",
                        (str(_sample_top(db)),))
+        # Kept so /api/export can tell the other phones to drop their copies of these rows too
+        db.executemany("INSERT OR IGNORE INTO deleted VALUES (?,?,?)", [(dev, a, b) for a, b in deleted])
         for a, b in deleted:
             # Open alerts go too: the phone keeps its open ones and resends them in this same request (inserted below)
             for table, col in (("sample", "t"), ("frame", "t"), ("alert", "start_t"), ("regen", "start_t")):
@@ -228,6 +231,24 @@ def merge_regens(rows):
     return merged
 
 
+SAME_BURN_MS = 30 * 60_000  # the phone's mergeSameBurn gap: a burn does not restart this soon after stopping
+
+
+def merge_same_burn(merged):
+    """Joins finished regens an ignition cycle split, as the phone's mergeSameBurn (Regens.kt) does: the second starts
+    within SAME_BURN_MS of the first's end and its soot carries on (not 5 points or more lower, which is a new burn)."""
+    out = []
+    for r in merged:
+        last = out[-1] if out else None
+        if (last is not None and last["end"] is not None and r["end"] is not None and 0 <= r["start"] - last["end"] <= SAME_BURN_MS
+                and last["soot_end"] is not None and r["soot_start"] is not None and r["soot_start"] >= last["soot_end"] - 5):
+            last["end"], last["soot_end"] = r["end"], r["soot_end"]
+            last["devices"] |= r["devices"]
+        else:
+            out.append(r)
+    return out
+
+
 def close_if_stale(db, row, now_ms):
     """A phone killed mid-regen never writes end_t. Once that phone has gone quiet, end the regen at its last
     regen reading so it doesn't swallow every later regen in merge_regens."""
@@ -263,7 +284,7 @@ def summary(db, now_ms):
     names = dict(db.execute("SELECT id, name FROM device"))
     rows = [close_if_stale(db, r, now_ms) for r in
             db.execute("SELECT device, start_t, end_t, soot_start, soot_end FROM regen ORDER BY start_t")]
-    regens = merge_regens(rows)
+    regens = merge_same_burn(merge_regens(rows))
     prev_end = None
     for r in regens:
         r["gap_m"] = distance_m(db, prev_end, r["start"]) if prev_end is not None else None
@@ -413,6 +434,8 @@ def export(db, device, after, now_ms):
     return {
         "samples": [list(r[1:]) for r in samples],
         "regens": regens,
+        # Every other phone's deleted windows, whole each time (a short list): the phone drops its copies in them
+        "deleted": [list(r) for r in db.execute("SELECT device, from_t, to_t FROM deleted WHERE device != ?", (device,))],
         "next": samples[-1][0] if samples else after,
         "more": len(samples) == EXPORT_PAGE,
     }

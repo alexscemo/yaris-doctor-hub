@@ -202,6 +202,16 @@ class HubTest(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT id FROM regen WHERE device = ?", (A,)).fetchall(), [(2,)])
         self.assertEqual(self.db.execute("SELECT phone_rowid FROM frame").fetchall(), [(2,)])
         self.assertEqual(self.db.execute("SELECT id FROM alert").fetchall(), [(2,)], "an open warning stays")
+        self.assertEqual(app.export(self.db, B, 0, 10**13)["deleted"], [[A, 0, 21 * MIN]], "Sam's phone is told to drop its copies")
+        self.assertEqual(app.export(self.db, A, 0, 10**13)["deleted"], [], "never a phone's own windows")
+
+    def test_regen_split_by_the_ignition_counts_once(self):
+        # 10 min burn, engine off for 5, the same burn carries on (soot 40 -> 41); then a real new burn hours later
+        self.sync(A, "Alex", drive(A, 0, 30, 0), [[1, 0, 10 * MIN, None, None, 80, 40], [2, 15 * MIN, 25 * MIN, None, None, 41, 10],
+                                                  [3, 300 * MIN, 315 * MIN, None, None, 85, 10]])
+        regens = app.summary(self.db, 10**13)["regens"]
+        self.assertEqual([(r["start"], r["end"], r["soot_start"], r["soot_end"]) for r in regens[::-1]],
+                         [(0, 25 * MIN, 80, 10), (300 * MIN, 315 * MIN, 85, 10)])
         self.assertEqual(self.sync(A, "Alex")["deleted"], 0)
         for bad in ([[0]], [["0", 1]], "all"):
             with self.assertRaises(ValueError):
