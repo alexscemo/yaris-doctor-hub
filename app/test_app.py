@@ -226,6 +226,22 @@ class HubTest(unittest.TestCase):
         got = app.export(self.db, B, cursor, 10**13)["samples"]
         self.assertEqual([r[1] for r in got], [21, 22, 23, 24, 25], "new rows sort after the cursor, not in the deleted rows' place")
 
+    def test_migrations_upgrade_an_old_database_once_and_keep_its_rows(self):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "hub.db")
+        old = app.connect(path)
+        app.ingest(old, {"device_id": A, "name": "Alex", "samples": drive(A, 0, 10, 0)}, 10**13)
+        old.execute("DROP INDEX sample_device_odo")
+        old.execute("PRAGMA user_version = 0")  # as a hub from before migrations left it
+        old.close()
+        db = app.connect(path)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], len(app.MIGRATIONS))
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM sample").fetchone()[0], 10)
+        plan = " ".join(r[3] for r in db.execute("EXPLAIN QUERY PLAN SELECT MIN(odo_m) FROM sample WHERE device = ?", (A,)))
+        self.assertIn("sample_device_odo", plan, "distance_m's base odometer is an index lookup, not a scan")
+        db.close()
+        app.connect(path).close()  # a second start runs nothing again
+
 
 if __name__ == "__main__":
     unittest.main()

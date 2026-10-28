@@ -82,16 +82,23 @@ minute after a drive, whenever it is on that Wi-Fi; **Sync now** forces an uploa
 - Distance between regens is the car's distance: the sum of every phone's GPS distance in that window.
 - If a phone is killed mid-regen and never records the end, the hub ends that regen at its last reading.
 - **Live data:** the phones also upload every raw engine reply ("frames") and their PID table, so the **Live data** view
-  shows each of the ~100 engine values decoded the same way as the app, with a 30-minute chart per value. The hub keeps
-  every frame it receives (the phones thin theirs after 30 days).
+  shows each of the ~100 engine values decoded the same way as the app, with a 30-minute chart per value.
+- **Full-detail backup of every frame:** the hub keeps every frame ever recorded and never thins them. The phones keep
+  full detail for 7 days only, then one frame per value per minute up to 90 days and one per hour after that, and they
+  never thin a frame the hub hasn't received yet (a phone away from home for weeks keeps everything until it syncs).
+  So the hub's database is the only complete copy: back up its `data` folder.
 - **Health:** the phones run the health checks and upload what they find. The Overview's status card shows "All good"
   or the open warnings, and what was seen in the last 7 days. The hub repeats the phones' results and checks nothing itself.
 - **Warning history:** every warning a phone ever logged is kept. Click one (in the status card or the Warning history
   table) to open it: what the check looks for and where its threshold comes from, every time it happened, and a chart
   of each value it reads from 2 minutes before to 2 minutes after, with the warning's own time shaded.
 
-Each phone keeps its full log too, so losing the hub loses nothing. Phones also download the other phones' logs
-from the hub while at home, so each phone's own screen shows the whole car.
+Each phone keeps its own readings, regens and warnings too, so losing the hub loses only the frames older than the
+phones' 7 days of full detail. Phones also download the other phones' logs from the hub while at home, so each phone's
+own screen shows the whole car.
+
+**Upgrades:** the database records its schema version (`PRAGMA user_version`), and a new image upgrades an existing
+`hub.db` in place on first start, keeping every row. Pull the new image and restart the container; nothing else to do.
 
 ## API
 
@@ -114,6 +121,7 @@ Python standard library only, no dependencies.
 ```sh
 cd app
 python -m unittest -v test_app.py   # tests (in-memory database)
+# schema changes: append a step to MIGRATIONS in app.py; never edit SCHEMA or an existing step
 DB_PATH=dev.db python app.py         # run locally on :8765
 ```
 

@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS dpf(
 CREATE TABLE IF NOT EXISTS deleted(device TEXT NOT NULL, from_t INTEGER NOT NULL, to_t INTEGER NOT NULL, PRIMARY KEY(device, from_t, to_t));
 """
 
+# Schema changes, oldest first; PRAGMA user_version counts the steps a database has run. SCHEMA above is the baseline
+# and stays as it is: change the schema only by appending a step here (never edit or remove one), or existing hubs miss it.
+MIGRATIONS = [
+    # 1: distance_m's MIN(odo_m) per phone, which otherwise reads all of that phone's samples once per regen
+    ["CREATE INDEX IF NOT EXISTS sample_device_odo ON sample(device, odo_m)"],
+]
+
 write_lock = threading.Lock()  # SQLite takes one writer; uploads are rare, so serialise them
 
 
@@ -64,6 +71,19 @@ def connect(path=None):
     db = sqlite3.connect(path or DB_PATH, timeout=30)
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript(SCHEMA)
+    if db.execute("PRAGMA user_version").fetchone()[0] < len(MIGRATIONS):
+        with write_lock:
+            # Re-read under the lock: another request may have just run the steps
+            for version in range(db.execute("PRAGMA user_version").fetchone()[0], len(MIGRATIONS)):
+                db.execute("BEGIN IMMEDIATE")  # a step and its version number commit together, or neither does
+                try:
+                    for sql in MIGRATIONS[version]:
+                        db.execute(sql)
+                    db.execute(f"PRAGMA user_version = {version + 1}")
+                    db.commit()
+                except BaseException:
+                    db.rollback()
+                    raise
     return db
 
 
