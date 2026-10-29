@@ -249,6 +249,7 @@
   <div class="stats" aria-label="Regens">
     <div class="stat"><div class="caps">Since last regen</div><div class="value" id="since">—</div><div class="sub" id="since-sub"></div></div>
     <div class="stat"><div class="caps">Regens logged</div><div class="value" id="count">—</div><div class="sub" id="count-sub"></div></div>
+    <div class="stat"><div class="caps">Odometer</div><div class="value" id="odo">—</div><div class="sub" id="odo-sub"></div></div>
   </div>
 
   <section class="grid2">
@@ -318,6 +319,8 @@ let data = null;
 
 const perUnit = () => (unit === "km" ? 1000 : 1609.344);
 const dist = (m) => (m == null ? "—" : `${Math.round(m / perUnit())} ${unit}`);
+/** An odometer reading, whole units like the dash: "89,159 mi". */
+const odo = (m) => (m == null ? "—" : `${Math.floor(m / perUnit()).toLocaleString()} ${unit}`);
 const fmt = (t) => new Date(t).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const day = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 const mins = (r) => (r.end == null ? "ongoing" : `${Math.round((r.end - r.start) / 60000)} min`);
@@ -448,6 +451,8 @@ function render() {
   $("soot-sub").textContent = last ? (last.live ? "now" : `at ${fmt(last.t)}`) : "no readings yet";
   $("since").textContent = dist(data.since_regen_m);
   $("since-sub").textContent = data.avg_gap_m == null ? "average after two regens" : `avg ${dist(data.avg_gap_m)} between`;
+  $("odo").textContent = odo(data.odometer_m);
+  $("odo-sub").textContent = data.odometer_m == null ? "after a phone reads it from the car" : "from the car's dashboard";
   $("count").textContent = data.regens.length;
   $("count-sub").textContent = data.regens.length ? `last ${fmt(data.regens[0].start)}` : "none yet";
 
@@ -653,7 +658,7 @@ function renderWarnings() {
     tr.tabIndex = 0;
     tr.setAttribute("role", "button");
     const rule = ruleOf(a.key);
-    const cells = [fmt(a.start), `${rule.title} · ${a.text}`, lasted(a), a.driver];
+    const cells = [a.odo_start == null ? fmt(a.start) : `${fmt(a.start)} · ${odo(a.odo_start)}`, `${rule.title} · ${a.text}`, lasted(a), a.driver];
     cells.forEach((c, k) => { const td = document.createElement("td"); td.textContent = c; if (!k) td.className = "when"; tr.appendChild(td); });
     if (a.level === 2) tr.children[1].prepend(critical(), " ");
     tr.addEventListener("click", () => openWarning(a));
@@ -673,7 +678,7 @@ function openWarning(a) {
   if (!times.some((h) => h.start === a.start)) times.unshift(a);
   const pick = (occ) => {
     $("warn-times").querySelectorAll(".chip").forEach((b) => b.setAttribute("aria-pressed", +b.dataset.start === occ.start));
-    $("warn-text").textContent = `${fmt(occ.start)} · ${lasted(occ)} · ${occ.driver} · ${occ.text}`;
+    $("warn-text").textContent = `${fmt(occ.start)}${occ.odo_start == null ? "" : ` at ${odo(occ.odo_start)}`} · ${lasted(occ)} · ${occ.driver} · ${occ.text}`;
     showWarningCharts(rule, occ);
   };
   $("warn-times").innerHTML = "";

@@ -76,10 +76,13 @@ minute after a drive, whenever it is on that Wi-Fi; **Sync now** forces an uploa
 
 ## How the data is combined
 
-- Readings and regens are stored per phone. Re-uploads are ignored (readings) or replace the row (regens, which gain
-  an end time later), so a phone can always resend safely.
+- Readings and regens are stored per phone. Re-uploads keep the row but take its new odometer (readings, frames) or
+  replace the row (regens and warnings, which gain an end time later), so a phone can always resend safely.
 - A regen seen by two phones (one hands the dongle to the other mid-burn) counts once.
-- Distance between regens is the car's distance: the sum of every phone's GPS distance in that window.
+- Distance between regens is the car's distance. Phones on app 1.2.0 or later log the car's own odometer (read from
+  the dashboard), so it is the odometer at the end minus at the start, and a drive two phones logged counts once. The
+  dashboard shows the odometer too, and each warning's mileage. Phones on older versions log GPS distance, summed per
+  phone as before; update every phone to get the shared odometer.
 - If a phone is killed mid-regen and never records the end, the hub ends that regen at its last reading.
 - **Live data:** the phones also upload every raw engine reply ("frames") and their PID table, so the **Live data** view
   shows each of the ~100 engine values decoded the same way as the app, with a 30-minute chart per value.

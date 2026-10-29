@@ -226,12 +226,48 @@ class HubTest(unittest.TestCase):
         got = app.export(self.db, B, cursor, 10**13)["samples"]
         self.assertEqual([r[1] for r in got], [21, 22, 23, 24, 25], "new rows sort after the cursor, not in the deleted rows' place")
 
+    def car(self, dev, name, samples, real_from=0, frames=(), alerts=()):
+        """A sync from app 1.2.0: odo_m is the car's odometer from `real_from` on."""
+        return app.ingest(self.db, {"device_id": dev, "name": name, "samples": list(samples), "odo_real_from": real_from,
+                                    "frames": list(frames), "alerts": list(alerts)}, 10**13)
+
+    def test_phones_on_the_car_odometer_count_a_shared_drive_once(self):
+        car0 = 143_000_000.0
+        # Both phones in the car for the first hour (same odometer), then only Sam's for another 30 min
+        self.car(A, "Alex", drive(A, 0, 60, car0))
+        self.car(B, "Sam", drive(B, 0, 90, car0))
+        self.assertAlmostEqual(app.distance_m(self.db, 0, 89 * MIN), 89_000.0, msg="one car, one odometer: not 59 + 89 km")
+        self.assertAlmostEqual(app.distance_m(self.db, 10 * MIN, 20 * MIN), 10_000.0)
+        self.assertAlmostEqual(app.summary(self.db, 100 * MIN)["odometer_m"], car0 + 89_000.0)
+
+    def test_a_resent_row_takes_its_new_odometer_and_keeps_the_rest(self):
+        self.sync(A, "Alex", drive(A, 0, 3, 1_000.0))  # GPS distance, as before 1.2.0
+        app.ingest(self.db, {"device_id": A, "frames": [[1, 0, "DD", "00"]]}, 0)  # an old phone's 4-value frame
+        moved = [r[:5] + [r[5] + 143_000_000.0] for r in drive(A, 0, 3, 1_000.0)]
+        self.car(A, "Alex", moved, frames=[[1, 0, "DD", "00", 143_001_000.0]])
+        self.assertEqual(self.db.execute("SELECT COUNT(*), MIN(odo_m) FROM sample").fetchone(), (3, 143_001_000.0))
+        self.assertEqual(self.db.execute("SELECT COUNT(*), MIN(odo_m) FROM frame").fetchone(), (1, 143_001_000.0))
+        app.ingest(self.db, {"device_id": A, "frames": [[1, 0, "DD", "00"]]}, 0)  # resent without one: kept
+        self.assertEqual(self.db.execute("SELECT odo_m FROM frame").fetchone()[0], 143_001_000.0)
+
+    def test_warnings_carry_the_odometer_and_old_phones_still_sync(self):
+        self.car(A, "Alex", drive(A, 0, 3, 143_000_000.0), alerts=[[1, "dtc", 1, "1 code", 0, 60_000, 143_000_000.0, 143_001_000.0]])
+        h = app.warnings(self.db)["history"][0]
+        self.assertEqual((h["odo_start"], h["odo_end"]), (143_000_000.0, 143_001_000.0))
+        app.ingest(self.db, {"device_id": B, "alerts": [[1, "dtc", 1, "1 code", 0, None]]}, 0)  # 6 values, as before
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM alert").fetchone()[0], 2)
+        with self.assertRaises(ValueError):
+            app.ingest(self.db, {"device_id": A, "alerts": [[1, "dtc", 1, "x", 0, None, 1.0]]}, 0)  # 7: neither shape
+
     def test_migrations_upgrade_an_old_database_once_and_keep_its_rows(self):
         import os, tempfile
         path = os.path.join(tempfile.mkdtemp(), "hub.db")
         old = app.connect(path)
         app.ingest(old, {"device_id": A, "name": "Alex", "samples": drive(A, 0, 10, 0)}, 10**13)
         old.execute("DROP INDEX sample_device_odo")
+        old.execute("DROP TABLE frame")  # the frame table before the odometer column
+        old.execute("CREATE TABLE frame(device TEXT NOT NULL, phone_rowid INTEGER NOT NULL, t INTEGER NOT NULL, lid TEXT NOT NULL, "
+                    "hex TEXT NOT NULL, PRIMARY KEY(device, phone_rowid))")
         old.execute("PRAGMA user_version = 0")  # as a hub from before migrations left it
         old.close()
         db = app.connect(path)
@@ -239,6 +275,7 @@ class HubTest(unittest.TestCase):
         self.assertEqual(db.execute("SELECT COUNT(*) FROM sample").fetchone()[0], 10)
         plan = " ".join(r[3] for r in db.execute("EXPLAIN QUERY PLAN SELECT MIN(odo_m) FROM sample WHERE device = ?", (A,)))
         self.assertIn("sample_device_odo", plan, "distance_m's base odometer is an index lookup, not a scan")
+        self.assertIn("odo_m", {r[1] for r in db.execute("PRAGMA table_info(frame)")})
         db.close()
         app.connect(path).close()  # a second start runs nothing again
 

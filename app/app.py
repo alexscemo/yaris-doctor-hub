@@ -57,11 +57,29 @@ CREATE TABLE IF NOT EXISTS dpf(
 CREATE TABLE IF NOT EXISTS deleted(device TEXT NOT NULL, from_t INTEGER NOT NULL, to_t INTEGER NOT NULL, PRIMARY KEY(device, from_t, to_t));
 """
 
+def _add_columns(table, *columns):
+    """A step adding `columns` ("name TYPE") to `table`, skipping any it already has: ALTER TABLE ADD COLUMN can't be re-run."""
+    def step(db):
+        have = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+        for col in columns:
+            if col.split()[0] not in have:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+    return step
+
+
 # Schema changes, oldest first; PRAGMA user_version counts the steps a database has run. SCHEMA above is the baseline
 # and stays as it is: change the schema only by appending a step here (never edit or remove one), or existing hubs miss it.
+# A step is a list of SQL statements or functions taking the database.
 MIGRATIONS = [
     # 1: distance_m's MIN(odo_m) per phone, which otherwise reads all of that phone's samples once per regen
     ["CREATE INDEX IF NOT EXISTS sample_device_odo ON sample(device, odo_m)"],
+    # 2: the car's own odometer (app 1.2.0): frames and warnings carry it, and each phone says since when its odo_m is the
+    # car's (odo_real_from; null = a phone still on GPS distance)
+    [
+        _add_columns("frame", "odo_m REAL"),
+        _add_columns("alert", "odo_start REAL", "odo_end REAL"),
+        _add_columns("device", "odo_real_from INTEGER"),
+    ],
 ]
 
 write_lock = threading.Lock()  # SQLite takes one writer; uploads are rare, so serialise them
@@ -78,7 +96,7 @@ def connect(path=None):
                 db.execute("BEGIN IMMEDIATE")  # a step and its version number commit together, or neither does
                 try:
                     for sql in MIGRATIONS[version]:
-                        db.execute(sql)
+                        sql(db) if callable(sql) else db.execute(sql)
                     db.execute(f"PRAGMA user_version = {version + 1}")
                     db.commit()
                 except BaseException:
@@ -98,11 +116,13 @@ def _num(v, kind=int, required=False):
 
 
 def _rows(value, width, name):
+    """`width` is the row length, or a tuple of the lengths accepted (an older phone sends the shorter row)."""
+    widths = width if isinstance(width, tuple) else (width,)
     if not isinstance(value, list) or len(value) > MAX_ROWS:
         raise ValueError(f"{name} must be a list of at most {MAX_ROWS} rows")
     for r in value:
-        if not isinstance(r, list) or len(r) != width:
-            raise ValueError(f"each {name} row must have {width} values")
+        if not isinstance(r, list) or len(r) not in widths:
+            raise ValueError(f"each {name} row must have {' or '.join(map(str, widths))} values")
     return value
 
 
@@ -172,15 +192,20 @@ def ingest(db, body, now_ms):
         (dev, _num(r[0], required=True), _num(r[1], required=True), _num(r[2]), _num(r[3], float), _num(r[4], float), _num(r[5]), _num(r[6]))
         for r in _rows(body.get("regens", []), 7, "regens")
     ]
+    # [rowid, t, lid, hex] and, from app 1.2.0, the car's odometer then (metres)
     frames = [
-        (dev, _num(r[0], required=True), _num(r[1], required=True), _match(r[2], LID_RE, "lid"), _match(r[3], HEX_RE, "hex"))
-        for r in _rows(body.get("frames", []), 4, "frames")
+        (dev, _num(r[0], required=True), _num(r[1], required=True), _match(r[2], LID_RE, "lid"), _match(r[3], HEX_RE, "hex"),
+         _num(r[4], float) if len(r) > 4 else None)
+        for r in _rows(body.get("frames", []), (4, 5), "frames")
     ]
+    # [id, key, level, text, start, end] and, from app 1.2.0, the odometer when it opened and closed
     alerts = [
         (dev, _num(r[0], required=True), _match(r[1], KEY_RE, "alert key"), _num(r[2], required=True), _str(r[3], 300, "alert text"),
-         _num(r[4], required=True), _num(r[5]))
-        for r in _rows(body.get("alerts", []), 6, "alerts")
+         _num(r[4], required=True), _num(r[5]), _num(r[6], float) if len(r) > 6 else None, _num(r[7], float) if len(r) > 6 else None)
+        for r in _rows(body.get("alerts", []), (6, 8), "alerts")
     ]
+    # From when this phone's odo_m is the car's odometer (the cluster's); before it, its estimate. Absent: GPS distance
+    odo_real_from = _num(body.get("odo_real_from"))
     # DPF condition per regen, worked out on the phone (Db.dpfRows): [regen start, restriction after it, rise per km]
     dpf = None if body.get("dpf") is None else [
         (dev, _num(r[0], required=True), _num(r[1], float), _num(r[2], float)) for r in _rows(body["dpf"], 3, "dpf")
@@ -201,17 +226,21 @@ def ingest(db, body, now_ms):
             # Open alerts go too: the phone keeps its open ones and resends them in this same request (inserted below)
             for table, col in (("sample", "t"), ("frame", "t"), ("alert", "start_t"), ("regen", "start_t")):
                 removed += db.execute(f"DELETE FROM {table} WHERE device = ? AND {col} BETWEEN ? AND ?", (dev, a, b)).rowcount
-        db.executemany("INSERT OR IGNORE INTO frame VALUES (?,?,?,?,?)", frames)
+        # A frame sent again (the phone moved its history onto the car's odometer) brings its odometer; the rest stays
+        db.executemany("INSERT INTO frame(device, phone_rowid, t, lid, hex, odo_m) VALUES (?,?,?,?,?,?) "
+                       "ON CONFLICT(device, phone_rowid) DO UPDATE SET odo_m = COALESCE(excluded.odo_m, frame.odo_m)", frames)
         # Alerts gain an end time and new text after upload, so the latest copy wins, like regens
-        db.executemany("INSERT OR REPLACE INTO alert VALUES (?,?,?,?,?,?,?)", alerts)
+        db.executemany("INSERT OR REPLACE INTO alert(device, id, key, level, text, start_t, end_t, odo_start, odo_end) VALUES (?,?,?,?,?,?,?,?,?)", alerts)
         if defs is not None:
             db.execute("INSERT OR REPLACE INTO meta VALUES ('defs', ?)", (json.dumps(defs),))
         if rules is not None:
             db.execute("INSERT OR REPLACE INTO meta VALUES ('rules', ?)", (json.dumps(rules),))
-        # Re-sent rows are ignored, so a phone that lost our reply can simply upload again
+        # A re-sent row keeps what it had, except its odometer: a phone that moved its history onto the car's odometer
+        # sends everything again. So a phone that lost our reply can simply upload again.
         # Rowids set here, above any ever used, so rows after a delete still sort after every export cursor
         top = _sample_top(db)
-        db.executemany("INSERT OR IGNORE INTO sample(rowid, device, phone_rowid, t, soot, temp, regen, odo_m) VALUES (?,?,?,?,?,?,?,?)",
+        db.executemany("INSERT INTO sample(rowid, device, phone_rowid, t, soot, temp, regen, odo_m) VALUES (?,?,?,?,?,?,?,?) "
+                       "ON CONFLICT(device, phone_rowid) DO UPDATE SET odo_m = excluded.odo_m",
                        [(top + 1 + i, *r) for i, r in enumerate(samples)])
         # Regens change after upload (end_t is set when they finish), so the phone resends them and the latest wins
         db.executemany("INSERT OR REPLACE INTO regen VALUES (?,?,?,?,?,?,?,?)", regens)
@@ -223,8 +252,9 @@ def ingest(db, body, now_ms):
             db.execute("DELETE FROM dpf WHERE device = ?", (dev,))
             db.executemany("INSERT OR REPLACE INTO dpf VALUES (?,?,?,?)", dpf)
         db.execute(
-            "INSERT INTO device VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, last_sync = excluded.last_sync",
-            (dev, name, now_ms),
+            "INSERT INTO device(id, name, last_sync, odo_real_from) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "name = excluded.name, last_sync = excluded.last_sync, odo_real_from = COALESCE(excluded.odo_real_from, device.odo_real_from)",
+            (dev, name, now_ms, odo_real_from),
         )
     # "frames" in the reply tells the phone this hub stores them (an older hub would silently drop them); "deleted" that it took the deletes
     return {"ok": True, "samples": len(samples), "regens": len(regens), "frames": len(frames), "alerts": len(alerts), "deleted": removed}
@@ -284,9 +314,32 @@ def close_if_stale(db, row, now_ms):
     return dev, start, last_regen or start, s0, s1
 
 
+def _car_phones(db):
+    """Phones whose odo_m is the car's own odometer (app 1.2.0 and later, once it read the cluster)."""
+    return [d for (d,) in db.execute("SELECT id FROM device WHERE odo_real_from IS NOT NULL")]
+
+
+def car_odometer(db, t, phones=None):
+    """The car's odometer at instant `t` (metres): the newest reading by then from any phone that logs the car's own
+    odometer, else the earliest one after. None when no phone does."""
+    phones = _car_phones(db) if phones is None else phones
+    if not phones:
+        return None
+    marks = ",".join("?" * len(phones))
+    row = db.execute(f"SELECT odo_m FROM sample WHERE device IN ({marks}) AND t <= ? AND odo_m IS NOT NULL ORDER BY t DESC LIMIT 1",
+                     (*phones, t)).fetchone() or \
+        db.execute(f"SELECT odo_m FROM sample WHERE device IN ({marks}) AND odo_m IS NOT NULL ORDER BY t LIMIT 1", phones).fetchone()
+    return row[0] if row else None
+
+
 def distance_m(db, t0, t1):
-    """Metres the car drove between two instants, summed over every phone's own GPS odometer.
-    Each phone's odo_m only grows, so its progress is (last reading by t1) - (last reading by t0)."""
+    """Metres the car drove between two instants. Phones on the car's odometer all log the same number, so it is the
+    odometer at t1 minus at t0: a drive two phones logged counts once. Phones still on GPS distance (each its own scale,
+    only growing) add up their progress, (last reading by t1) - (last reading by t0), as before."""
+    car = _car_phones(db)
+    if car:
+        a, b = car_odometer(db, t0, car), car_odometer(db, t1, car)
+        return max(0.0, b - a) if a is not None and b is not None else 0.0
     total = 0.0
     for (dev,) in db.execute("SELECT id FROM device"):
         base = db.execute("SELECT MIN(odo_m) FROM sample WHERE device = ?", (dev,)).fetchone()[0]
@@ -335,6 +388,8 @@ def summary(db, now_ms):
             "live": now_ms - last[0] <= LIVE_MS,
         },
         "since_regen_m": distance_m(db, prev_end, now_ms) if prev_end is not None else None,
+        # The car's odometer at the newest reading (metres); None until a phone logs it
+        "odometer_m": car_odometer(db, now_ms),
         "avg_gap_m": sum(gaps) / len(gaps) if gaps else None,
         "regens": regens[::-1],
         "soot_series": soot,
@@ -409,9 +464,9 @@ def warnings(db, limit=500):
         for key, title, level, about, uses in (json.loads(row[0]) if row else [])
     }
     history = [
-        {"key": k, "level": lv, "text": tx, "start": st, "end": en, "driver": dr}
-        for k, lv, tx, st, en, dr in db.execute(
-            "SELECT a.key, a.level, a.text, a.start_t, a.end_t, d.name FROM alert a JOIN device d ON d.id = a.device "
+        {"key": k, "level": lv, "text": tx, "start": st, "end": en, "driver": dr, "odo_start": o0, "odo_end": o1}
+        for k, lv, tx, st, en, dr, o0, o1 in db.execute(
+            "SELECT a.key, a.level, a.text, a.start_t, a.end_t, d.name, a.odo_start, a.odo_end FROM alert a JOIN device d ON d.id = a.device "
             "ORDER BY a.start_t DESC LIMIT ?", (limit,))
     ]
     return {"rules": rules, "history": history}
