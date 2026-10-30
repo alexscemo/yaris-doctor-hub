@@ -10,9 +10,13 @@ import re
 import sqlite3
 import threading
 import time
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import groupby
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
+
+from labels import LABELS, STATES
 
 DB_PATH = os.environ.get("DB_PATH", "hub.db")
 PORT = int(os.environ.get("PORT", "8765"))
@@ -22,6 +26,9 @@ MAX_ROWS = 10_000
 DEVICE_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 MERGE_SLACK_MS = 2 * 60_000  # regens seen by two phones (dongle hand-over) closer than this are one regen
 LIVE_MS = 60_000
+TRIP_GAP_MS = 2 * 60_000  # the phone's TRIP_GAP_MS: readings further apart than this are two trips
+SERIES_POINTS = 1500  # more than a chart has pixels; a narrower range comes back in finer detail
+STATS_ROWS = 5000
 HEX_RE = re.compile(r"^(?:[0-9A-F]{2}){1,64}$")
 LID_RE = re.compile(r"^[0-9A-F]{2}$")
 KEY_RE = re.compile(r"^[a-z0-9_]{1,40}$")
@@ -353,11 +360,47 @@ def distance_m(db, t0, t1):
     return total
 
 
-def summary(db, now_ms):
-    names = dict(db.execute("SELECT id, name FROM device"))
+def merged_regens(db, now_ms):
     rows = [close_if_stale(db, r, now_ms) for r in
             db.execute("SELECT device, start_t, end_t, soot_start, soot_end FROM regen ORDER BY start_t")]
-    regens = merge_same_burn(merge_regens(rows))
+    return merge_same_burn(merge_regens(rows))
+
+
+def trips(db, now_ms):
+    """Every drive of the car, newest first: a run of readings from any phone with no gap over TRIP_GAP_MS."""
+    names = dict(db.execute("SELECT id, name FROM device"))
+    car = set(_car_phones(db))
+    out, odo = [], {}
+    for t, soot, temp, dev, odo_m in db.execute("SELECT t, soot, temp, device, odo_m FROM sample ORDER BY t"):
+        if not out or t - out[-1]["end"] > TRIP_GAP_MS:
+            out.append({"start": t, "end": t, "soot_start": None, "soot_end": None, "peak_temp": None, "distance_m": 0.0, "drivers": set()})
+            odo = {}
+        trip = out[-1]
+        trip["end"] = t
+        trip["drivers"].add(names.get(dev, "?"))
+        if soot is not None:
+            trip["soot_start"] = soot if trip["soot_start"] is None else trip["soot_start"]
+            trip["soot_end"] = soot
+        if temp is not None:
+            trip["peak_temp"] = temp if trip["peak_temp"] is None else max(trip["peak_temp"], temp)
+        # As in distance_m: phones on the car's odometer share one number, so a drive two logged counts once; only
+        # with none of them do phones on GPS distance add up their own progress
+        if odo_m is not None and (not car or dev in car):
+            key = "car" if car else dev
+            trip["distance_m"] += max(0.0, odo_m - odo.get(key, odo_m))
+            odo[key] = max(odo_m, odo.get(key, odo_m))
+    regens = merged_regens(db, now_ms)
+    warned = [r[0] for r in db.execute("SELECT start_t FROM alert")]
+    for trip in out:
+        trip["drivers"] = sorted(trip["drivers"])
+        trip["regens"] = sum(r["start"] <= trip["end"] and (r["end"] is None or r["end"] >= trip["start"]) for r in regens)
+        trip["warnings"] = sum(trip["start"] <= t <= trip["end"] for t in warned)
+    return {"trips": out[::-1]}
+
+
+def summary(db, now_ms):
+    names = dict(db.execute("SELECT id, name FROM device"))
+    regens = merged_regens(db, now_ms)
     prev_end = None
     for r in regens:
         r["gap_m"] = distance_m(db, prev_end, r["start"]) if prev_end is not None else None
@@ -424,40 +467,63 @@ def defs_of(db):
     return json.loads(row[0]) if row else []
 
 
-def live(db, now_ms):
-    """Latest value of every PID (from any phone) and when it was read."""
-    out, latest = [], {}
+def _rows_for_stats(db, lid, t0, t1):
+    n, lo, hi = db.execute("SELECT COUNT(*), MIN(t), MAX(t) FROM frame WHERE lid = ? AND t BETWEEN ? AND ?", (lid, t0, t1)).fetchone()
+    if n <= STATS_ROWS:
+        return db.execute("SELECT t, hex FROM frame WHERE lid = ? AND t BETWEEN ? AND ? ORDER BY t", (lid, t0, t1)).fetchall()
+    # shortcut: long ranges read one frame per slice, so min/max can miss a brief spike (the charts read every frame); pre-aggregate if that matters
+    return db.execute("SELECT MAX(t), hex FROM frame WHERE lid = ? AND t BETWEEN ? AND ? GROUP BY t / ? ORDER BY 1",
+                      (lid, t0, t1, (hi - lo) // STATS_ROWS + 1)).fetchall()
+
+
+def stats(db, t0, t1):
+    """Every PID over a time range, with its plain-English name: the last value and min/avg/max, or how long in each state."""
+    out, frames = [], {}
     for d in defs_of(db):
-        lid = d[0]
-        if lid not in latest:
-            latest[lid] = db.execute("SELECT t, hex FROM frame WHERE lid = ? ORDER BY t DESC LIMIT 1", (lid,)).fetchone()
-        row = latest[lid]
-        out.append({
-            "id": f"{lid}.{d[1]}", "name": d[9], "unit": d[10], "category": d[11], "enum": d[12], "decimals": d[8],
-            "t": row[0] if row else None, "value": decode(d, row[1]) if row else None,
-        })
-    return {"now": now_ms, "values": out}
+        lid, pid_id = d[0], f"{d[0]}.{d[1]}"
+        if lid not in frames:
+            frames[lid] = _rows_for_stats(db, lid, t0, t1)
+        vals = [v for _, h in frames[lid] if (v := decode(d, h)) is not None]
+        label, about = LABELS.get(pid_id, (d[9], ""))
+        row = {"id": pid_id, "label": label, "about": about, "name": d[9], "unit": d[10], "category": d[11],
+               "enum": STATES.get(pid_id, d[12]), "decimals": d[8], "count": len(vals), "last": vals[-1] if vals else None,
+               "t": frames[lid][-1][0] if vals else None}
+        if vals and d[12]:
+            row["shares"] = {int(k): c / len(vals) for k, c in Counter(vals).items()}
+        elif vals:
+            row.update(min=min(vals), avg=sum(vals) / len(vals), max=max(vals))
+        out.append(row)
+    return {"values": out}
 
 
-def series(db, pid_id, span_ms, window=None):
-    """[[t, value], ...] of one PID oldest first: over the last `span_ms` it was read, or within `window` = (from, to)."""
+def series(db, pid_id, t0, t1):
+    """[[t, value], ...] of one PID oldest first, within t0..t1."""
     d = next((d for d in defs_of(db) if f"{d[0]}.{d[1]}" == pid_id), None)
     if d is None:
         return []
-    if window:
-        rows = db.execute("SELECT t, hex FROM frame WHERE lid = ? AND t BETWEEN ? AND ? ORDER BY t", (d[0], *window)).fetchall()
-    else:
-        rows = db.execute(
-            "SELECT t, hex FROM frame WHERE lid = ?1 AND t >= (SELECT MAX(t) FROM frame WHERE lid = ?1) - ?2 ORDER BY t", (d[0], span_ms)
-        ).fetchall()
+    rows = db.execute("SELECT t, hex FROM frame WHERE lid = ? AND t BETWEEN ? AND ? ORDER BY t", (d[0], t0, t1)).fetchall()
     return [[t, v] for t, h in rows if (v := decode(d, h)) is not None]
+
+
+def bucketed(points, n=SERIES_POINTS):
+    """[[t, avg, min, max], ...]: at most `n` rows, with short series passed through untouched so no detail is lost."""
+    if len(points) <= n:
+        return [[t, v, v, v] for t, v in points]
+    width = (points[-1][0] - points[0][0]) // n + 1
+    out = []
+    for _, group in groupby(points, key=lambda p: p[0] // width):
+        group = list(group)
+        vals = [p[1] for p in group]
+        out.append([group[0][0], sum(vals) / len(vals), min(vals), max(vals)])
+    return out
 
 
 def warnings(db, limit=500):
     """Every stored warning, newest first, plus what each rule checks and the values it reads (as PID ids for /api/series)."""
     ids = {}
     for d in defs_of(db):
-        ids.setdefault(d[9], {"id": f"{d[0]}.{d[1]}", "name": d[9], "unit": d[10], "enum": d[12], "decimals": d[8]})
+        pid_id = f"{d[0]}.{d[1]}"
+        ids.setdefault(d[9], {"id": pid_id, "name": LABELS.get(pid_id, (d[9],))[0], "unit": d[10], "enum": STATES.get(pid_id, d[12]), "decimals": d[8]})
     row = db.execute("SELECT v FROM meta WHERE k = 'rules'").fetchone()
     rules = {
         key: {"title": title, "level": level, "about": about, "values": [ids[u] for u in uses if u in ids]}
@@ -550,24 +616,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, export(db, device, int(after), int(time.time() * 1000)))
             finally:
                 db.close()
-        elif self.path == "/api/live":
+        elif self.path == "/api/trips":
             db = connect()
             try:
-                self._send(200, live(db, int(time.time() * 1000)))
+                self._send(200, trips(db, int(time.time() * 1000)))
+            finally:
+                db.close()
+        elif self.path.startswith("/api/stats?"):
+            q = parse_qs(urlsplit(self.path).query)
+            t0, t1 = q.get("from", [""])[0], q.get("to", [""])[0]
+            if not (t0.isdigit() and t1.isdigit()):
+                return self._send(400, {"error": "need from=<ms>&to=<ms>"})
+            db = connect()
+            try:
+                self._send(200, stats(db, int(t0), int(t1)))
             finally:
                 db.close()
         elif self.path.startswith("/api/series?"):
             q = parse_qs(urlsplit(self.path).query)
             pid_id = q.get("id", [""])[0]
-            span = q.get("span", ["1800000"])[0]
             t0, t1 = q.get("from", [""])[0], q.get("to", [""])[0]
-            if not PID_ID_RE.match(pid_id) or not span.isdigit() or (t0 or t1) and not (t0.isdigit() and t1.isdigit()):
-                return self._send(400, {"error": "need id=<lid>.<bit> and span=<ms> or from=<ms>&to=<ms>"})
-            # A window of at most a day: a warning's own span plus a margin, never the whole history
-            window = (int(t0), min(int(t1), int(t0) + 86_400_000)) if t0 else None
+            if not PID_ID_RE.match(pid_id) or not (t0.isdigit() and t1.isdigit()):
+                return self._send(400, {"error": "need id=<lid>.<bit>&from=<ms>&to=<ms>"})
             db = connect()
             try:
-                self._send(200, {"points": series(db, pid_id, min(int(span), 7 * 86_400_000), window)})
+                self._send(200, {"points": bucketed(series(db, pid_id, int(t0), int(t1)))})
             finally:
                 db.close()
         elif self.path == "/api/warnings":
@@ -603,7 +676,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, result)
 
     def log_message(self, fmt, *args):
-        if not self.path.startswith(("/api/summary", "/api/export", "/api/live", "/api/series", "/api/warnings")):  # polled; keep the log readable
+        if not self.path.startswith(("/api/summary", "/api/export", "/api/trips", "/api/stats", "/api/series", "/api/warnings")):  # polled; keep the log readable
             super().log_message(fmt, *args)
 
 

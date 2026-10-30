@@ -84,8 +84,12 @@ minute after a drive, whenever it is on that Wi-Fi; **Sync now** forces an uploa
   dashboard shows the odometer too, and each warning's mileage. Phones on older versions log GPS distance, summed per
   phone as before; update every phone to get the shared odometer.
 - If a phone is killed mid-regen and never records the end, the hub ends that regen at its last reading.
-- **Live data:** the phones also upload every raw engine reply ("frames") and their PID table, so the **Live data** view
-  shows each of the ~100 engine values decoded the same way as the app, with a 30-minute chart per value.
+- **Data:** the phones also upload every raw engine reply ("frames") and their PID table, so the **Data** view can show
+  any drive or period in full. Every trip is listed with its length, distance, soot, peak DPF temperature, regens and
+  warnings; sort by any column and click one, or pick a period. Charts of the values you choose stack on one time axis:
+  hover reads them all at the same moment, and dragging across one zooms them all down to single readings. Below them,
+  all ~100 engine values by category under plain-English names (`app/labels.py`), each with its last value and range over
+  that period. Clicking a regen in the Overview's history opens that burn the same way.
 - **Full-detail backup of every frame:** the hub keeps every frame ever recorded and never thins them. The phones keep
   full detail for 7 days only, then one frame per value per minute up to 90 days and one per hour after that, and they
   never thin a frame the hub hasn't received yet (a phone away from home for weeks keeps everything until it syncs).
@@ -110,8 +114,9 @@ own screen shows the whole car.
 | `POST` | `/api/sync` | Phone upload: `{device_id, name, samples: [[rowid, t, soot, temp, regen, odo_m]…], regens: [[id, start_t, end_t, odo_start, odo_end, soot_start, soot_end]…]}`, optionally `frames: [[rowid, t, lid, hex]…]`, `alerts: [[id, key, level, text, start_t, end_t]…]`, `rules: [[key, title, level, about, [value names]]…]` `defs` (the PID table: `[[lid, bit_start, bit_end, len, signed, mul, div, offset, decimals, name, unit, category, enum]…]`), `dpf: [[regen_start, base, per_km]…]` (DPF condition per regen, replaces the phone's previous set), `regens_all: true` (the regens are the phone's whole list: ones it no longer has are deleted) and `deleted: [[from, to]…]` (trips deleted on the phone: its samples, frames, closed alerts and regens starting in those inclusive time windows are removed). The reply counts what was stored; its `frames` key tells the phone this hub stores frames, its `deleted` key (rows removed) that it takes deletes |
 | `GET` | `/api/export?device=<id>&after=<cursor>` | What every *other* phone logged, so each phone shows the whole car: `{samples: [[device, phone_rowid, t, soot, temp, regen, odo_m]…], regens: [[device, id, start_t, end_t, soot_start, soot_end]…], next, more}`. Samples come 5000 at a time after `cursor` (start at 0, then pass `next` while `more`); regens are always the full list, stale open ones closed |
 | `GET` | `/api/summary` | Everything the Overview shows, as JSON, including `alerts` (open and last 7 days, one per check) |
-| `GET` | `/api/live` | Latest decoded value of every engine PID: `{now, values: [{id, name, unit, category, enum, decimals, t, value}…]}` |
-| `GET` | `/api/series?id=<lid>.<bit>&span=<ms>` | One PID over the last `span` ms it was read (max 7 days): `{points: [[t, value]…]}`. With `from=<ms>&to=<ms>` instead: that window, at most a day |
+| `GET` | `/api/trips` | Every drive of the car, newest first: `{trips: [{start, end, soot_start, soot_end, peak_temp, distance_m, drivers, regens, warnings}…]}` |
+| `GET` | `/api/stats?from=<ms>&to=<ms>` | Every engine PID over that window: `{values: [{id, label, about, name, unit, category, enum, decimals, count, last, t, min, avg, max}…]}`, with `shares: {state: fraction}` in place of min/avg/max for a value with named states. Over very long windows it reads one frame per slice, so min/max can miss a brief spike |
+| `GET` | `/api/series?id=<lid>.<bit>&from=<ms>&to=<ms>` | One PID over that window: `{points: [[t, avg, min, max]…]}`, every reading when there are up to 1500, otherwise averaged into about that many time buckets |
 | `GET` | `/api/warnings` | Every warning, newest first (up to 500), and each check's title, level, description and the values it reads: `{rules: {key: {title, level, about, values}}, history: [{key, level, text, start, end, driver}…]}` |
 | `GET` | `/health` | `{"ok": true}` |
 

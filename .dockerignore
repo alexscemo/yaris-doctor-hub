@@ -1,5 +1,6 @@
 *
 !app/app.py
+!app/labels.py
 !app/dashboard.html
 !app/icon.svg
 !app/fonts

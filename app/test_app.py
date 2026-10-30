@@ -2,6 +2,7 @@
 import unittest
 
 import app
+import labels
 
 MIN = 60_000
 A = "aaaaaaaa-1111"
@@ -103,12 +104,17 @@ class HubTest(unittest.TestCase):
         r = app.ingest(self.db, {"device_id": A, "defs": self.DEFS,
                                  "frames": [[1, 1000, "DD", self.DD], [2, 1000, "F1", self.F1], [3, 2000, "DD", self.DD[:-2] + "19"]]}, 0)
         self.assertEqual(r["frames"], 3, "the reply tells the phone frames are stored")
-        v = {x["name"]: x for x in app.live(self.db, 5000)["values"]}
-        self.assertEqual(v["PM Accumulation Ratio"]["value"], 50.0)  # newest frame: 0x19 * 2
-        self.assertEqual(v["PM Accumulation Ratio"]["t"], 2000)
-        self.assertAlmostEqual(v["Exhaust Temperature B1S1"]["value"], 59.3)  # 95*25/4 = 593 (truncated) / 10
-        self.assertIsNone(v["Pilot 1 Injection Timing"]["value"], "never read")
-        self.assertEqual(app.series(self.db, "DD.136", 1800000), [[1000, 46.0], [2000, 50.0]])
+        v = {x["name"]: x for x in app.stats(self.db, 0, 5000)["values"]}
+        soot = v["PM Accumulation Ratio"]
+        self.assertEqual(soot["last"], 50.0)  # newest frame: 0x19 * 2
+        self.assertEqual(soot["t"], 2000)
+        self.assertEqual((soot["min"], soot["avg"], soot["max"]), (46.0, 48.0, 50.0))
+        self.assertEqual(soot["label"], "Soot load")
+        self.assertEqual(v["Exhaust Temperature B1S1"]["label"], "Exhaust temperature, sensor 1")
+        self.assertAlmostEqual(v["Exhaust Temperature B1S1"]["last"], 59.3)  # 95*25/4 = 593 (truncated) / 10
+        self.assertIsNone(v["Pilot 1 Injection Timing"]["last"], "never read")
+        self.assertEqual(app.stats(self.db, 1500, 5000)["values"][0]["count"], 1, "only that range")
+        self.assertEqual(app.series(self.db, "DD.136", 0, 5000), [[1000, 46.0], [2000, 50.0]])
         # Signed fields, truncated toward zero like Kotlin: 0xFFBA = -70 → -7.0; 0xFFFF = -1, -1*25/4 = -6.25 → -6 → -0.6
         self.assertEqual(app.decode(self.DEFS[2], "0" * 16 + "FFBA" + "0" * 32), -7.0)
         self.assertEqual(app.decode(self.DEFS[1], "0" * 8 + "FFFF" + "0" * 6), -0.6)
@@ -157,7 +163,7 @@ class HubTest(unittest.TestCase):
         self.assertEqual(w["rules"]["regen_frequent"]["values"], [])
         self.assertEqual(w["rules"]["coolant_hot"]["values"], [])
         # The chart around that warning: only frames inside the window
-        self.assertEqual(app.series(self.db, "DD.136", 0, (3000, 7000)), [[5000, 128.0]])
+        self.assertEqual(app.series(self.db, "DD.136", 3000, 7000), [[5000, 128.0]])
 
     def test_rejects_bad_rules(self):
         for rules in (
@@ -258,6 +264,42 @@ class HubTest(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM alert").fetchone()[0], 2)
         with self.assertRaises(ValueError):
             app.ingest(self.db, {"device_id": A, "alerts": [[1, "dtc", 1, "x", 0, None, 1.0]]}, 0)  # 7: neither shape
+
+    def test_trips_split_on_a_gap_and_span_a_hand_over(self):
+        # Alex drives 0-9 min, Sam takes over 1 min later (one trip); a gap of 30 min, then Alex again with a regen
+        self.sync(A, "Alex", drive(A, 0, 10, 0) + drive(A, 50 * MIN, 5, 10_000.0, first_rowid=11), [[1, 51 * MIN, 52 * MIN, None, None, 80, 10]])
+        self.sync(B, "Sam", drive(B, 10 * MIN, 10, 7_000.0))
+        app.ingest(self.db, {"device_id": A, "name": "Alex", "alerts": [[1, "dtc", 1, "x", 53 * MIN, None]]}, 10**13)
+        newest, oldest = app.trips(self.db, 10**13)["trips"]
+        self.assertEqual((oldest["start"], oldest["end"], oldest["drivers"]), (0, 19 * MIN, ["Alex", "Sam"]))
+        self.assertAlmostEqual(oldest["distance_m"], 18_000.0)  # 9 km each
+        self.assertEqual((oldest["regens"], oldest["warnings"]), (0, 0))
+        self.assertEqual((newest["start"], newest["regens"], newest["warnings"], newest["peak_temp"]), (50 * MIN, 1, 1, 300))
+        self.assertEqual(app.trips(app.connect(":memory:"), 0), {"trips": []})
+
+    def test_series_is_bucketed_only_when_too_long_to_draw(self):
+        self.assertEqual(app.bucketed([[0, 1.0], [10, 2.0]], 2), [[0, 1.0, 1.0, 1.0], [10, 2.0, 2.0, 2.0]])
+        got = app.bucketed([[t, float(t)] for t in range(1000)], 10)
+        self.assertLessEqual(len(got), 11)
+        self.assertEqual((got[0][0], min(g[2] for g in got), max(g[3] for g in got)), (0, 0.0, 999.0), "the extremes survive")
+
+    def test_a_value_without_a_label_shows_its_sheet_name_and_states_are_shared_out(self):
+        app.ingest(self.db, {"device_id": A, "defs": [["EE", 7, 7, 4, False, 1, 1, 0, 0, "ACT VSV", "", "Switches", ["OFF", "ON"]]],
+                             "frames": [[1, 1000, "EE", "01000000"], [2, 2000, "EE", "01000000"], [3, 3000, "EE", "01000000"], [4, 4000, "EE", "00000000"]]}, 0)
+        v = app.stats(self.db, 0, 5000)["values"][0]
+        self.assertEqual((v["label"], v["last"], v["shares"]), ("ACT VSV", 0.0, {1: 0.75, 0: 0.25}))
+
+    def test_every_label_id_is_well_formed(self):
+        for pid_id, (label, _) in labels.LABELS.items():
+            self.assertRegex(pid_id, app.PID_ID_RE)
+            self.assertTrue(label)
+
+    def test_a_trip_two_phones_logged_on_the_car_odometer_counts_once(self):
+        self.car(A, "Alex", drive(A, 0, 60, 143_000_000.0))
+        self.car(B, "Sam", drive(B, 0, 90, 143_000_000.0))
+        trip = app.trips(self.db, 10**13)["trips"][0]
+        self.assertAlmostEqual(trip["distance_m"], app.distance_m(self.db, trip["start"], trip["end"]))
+        self.assertAlmostEqual(trip["distance_m"], 89_000.0)
 
     def test_migrations_upgrade_an_old_database_once_and_keep_its_rows(self):
         import os, tempfile

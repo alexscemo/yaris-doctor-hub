@@ -181,6 +181,33 @@
   .row .val { color: var(--ink); font-weight: 800; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .row .age { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
   .row:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .row .name { min-width: 0; }
+  .row .val { max-width: 50%; white-space: normal; }
+  .row .about { display: block; color: var(--muted); font-size: 13px; font-weight: 400; margin-top: 2px; }
+  .row[aria-pressed="true"] { box-shadow: inset 4px 0 var(--primary); padding-left: 14px; }
+  .cat-head { font: 600 18px/1.35 var(--sans); margin: 24px 0 8px; }
+
+  /* Data view */
+  .trips { max-height: 360px; overflow-y: auto; }
+  .trips th { position: sticky; top: 0; background: var(--canvas); padding: 0; white-space: nowrap; }
+  .trips td { white-space: nowrap; }
+  .sort { all: unset; cursor: pointer; display: block; padding: 8px 12px 8px 0; }
+  .sort:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+  tr[aria-current="true"] td { background: var(--surface-alt); box-shadow: inset 0 -2px var(--primary); }
+  .range { align-items: center; margin-top: 8px; }
+  .range label { display: inline-flex; align-items: center; gap: 8px; }
+  .when-input { font: 400 14px/1.4 var(--sans); color: var(--ink); background: var(--surface-card); border: 1px solid var(--control-border);
+                border-radius: 9999px; padding: 0 14px; min-height: 44px; }
+  .when-input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .stack-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .legend-only { display: flex; gap: 16px; }
+  .stacked { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hairline-soft); }
+  .stacked-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .stacked-head h3 { font: 600 14px/1.4 var(--sans); }
+  .remove { border: 1px solid var(--control-border); background: var(--surface-card); color: var(--ink); border-radius: 9999px;
+            width: 32px; height: 32px; font-size: 16px; cursor: pointer; flex: none; }
+  .remove:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  #stack svg { cursor: crosshair; }
 
   /* Warnings: clickable rows and the detail dialog */
   tr.clickable { cursor: pointer; }
@@ -226,7 +253,7 @@
 
   <div class="chips views" role="group" aria-label="View">
     <button class="chip" data-view="overview">Overview</button>
-    <button class="chip" data-view="live">Live data</button>
+    <button class="chip" data-view="data">Data</button>
   </div>
 
   <div id="view-overview">
@@ -293,11 +320,55 @@
   </section>
   </div>
 
-  <div id="view-live" hidden>
-    <p class="hint" id="live-head" style="margin: 0;">Loading…</p>
-    <input class="search" id="live-search" type="search" placeholder="Search values" aria-label="Search values">
-    <div class="chips" id="live-cats" role="group" aria-label="Category"></div>
-    <div class="values" id="live-rows"></div>
+  <div id="view-data" hidden>
+    <section style="margin-top: 0">
+      <div class="caps">Trips</div>
+      <h2 class="display">Every drive</h2>
+      <div class="table-wrap trips">
+        <table>
+          <thead><tr id="trip-head"></tr></thead>
+          <tbody id="trip-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <div class="caps">Or a period</div>
+      <div class="chips range" id="range-chips" role="group" aria-label="Period">
+        <button class="chip" data-days="1">24 hours</button>
+        <button class="chip" data-days="7">7 days</button>
+        <button class="chip" data-days="30">30 days</button>
+        <button class="chip" data-days="all">Everything</button>
+        <label class="caps">From <input class="when-input" id="range-from" type="datetime-local"></label>
+        <label class="caps">To <input class="when-input" id="range-to" type="datetime-local"></label>
+      </div>
+    </section>
+
+    <section class="card" id="stack-card">
+      <div class="stack-top">
+        <div>
+          <div class="caps">Showing</div>
+          <h2 id="range-title">Loading…</h2>
+          <p class="hint" id="range-sub"></p>
+        </div>
+        <button class="chip" id="zoom-reset" hidden>Zoom out</button>
+      </div>
+      <p class="hint">Drag across a chart to zoom · hover or tap to read every chart at that moment · line is the average, band the lowest to highest</p>
+      <div class="chart legend-only">
+        <div class="legend caps"><i></i>Regen</div>
+        <div class="legend caps"><i style="background: var(--muted-soft); opacity: 0.4"></i>Warning active</div>
+      </div>
+      <div id="stack"></div>
+    </section>
+
+    <section>
+      <div class="caps">All values</div>
+      <h2 class="display">By category</h2>
+      <p class="hint">Over the period above: the last value, and its range. Click a value to add or remove its chart.</p>
+      <input class="search" id="data-search" type="search" placeholder="Search values" aria-label="Search values">
+      <div class="chips" id="data-cats" role="group" aria-label="Category"></div>
+      <div class="values" id="data-rows"></div>
+    </section>
   </div>
 </div>
 <dialog id="warn-dialog" aria-labelledby="warn-title">
@@ -481,6 +552,11 @@ function render() {
   $("history").innerHTML = data.regens.length ? "" : `<tr><td colspan="5" class="empty">No regens yet. They appear after a phone syncs.</td></tr>`;
   for (const r of data.regens.slice(0, 100)) {
     const tr = document.createElement("tr");
+    tr.className = "clickable";
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.addEventListener("click", () => openRegen(r));
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRegen(r); } });
     const cells = [fmt(r.start), mins(r), r.gap_m == null ? "first logged" : dist(r.gap_m), `${r.soot_start ?? "?"}→${r.soot_end ?? "?"}%`, r.drivers.join(", ")];
     cells.forEach((c, k) => { const td = document.createElement("td"); td.textContent = c; if (!k) td.className = "when"; tr.appendChild(td); });
     if (r.end == null) { const b = document.createElement("span"); b.className = "badge-coral"; b.textContent = "Ongoing"; tr.children[1].textContent = ""; tr.children[1].appendChild(b); }
@@ -543,9 +619,17 @@ function renderHealth(alerts) {
   h.appendChild(document.createElement("hr"));
 }
 
-// ---------- Live data view: every engine value the phones upload, like the phone's All data tab ----------
-let view = "overview", live = null, cat = null, query = "", open = null;
-try { view = localStorage.getItem("view") || "overview"; } catch (e) {}
+// ---------- Data view: every trip, any period, every engine value by category, and stacked charts ----------
+const DEFAULT_PICKS = ["DD.136", "F1.48", "0C.0", "0D.0"];
+const REGEN_PICKS = ["F1.48", "DD.136", "AD.48", "EF.0", "0D.0"];
+const CAT_ORDER = ["DPF / exhaust", "Engine", "Turbo", "Air intake", "EGR", "Fuel / injection", "Electrical", "Switches", "Diagnostics"];
+const DAY = 86400000;
+let view = "overview", cat = null, query = "", trips = null, values = [], charts = [];
+let range = null, base = null, loadToken = 0, sortKey = "start", sortDesc = true, picks = DEFAULT_PICKS;
+try {
+  if (localStorage.getItem("view") === "data") view = "data"; // an older "live" falls back to the Overview
+  picks = JSON.parse(localStorage.getItem("picks")) || DEFAULT_PICKS;
+} catch (e) {}
 
 const valueText = (v) => {
   if (v.value == null) return "—";
@@ -553,96 +637,335 @@ const valueText = (v) => {
   return `${v.value.toFixed(v.decimals)}${v.unit ? " " + v.unit : ""}`;
 };
 const time = (t) => new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-const age = (t) => {
-  const s = Math.round((live.now - t) / 1000);
-  return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : fmt(t);
-};
+const hhmm = (t) => new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+const lengthOf = (ms) => (ms < 3600000 ? `${Math.max(1, Math.round(ms / 60000))} min` : `${Math.floor(ms / 3600000)} h ${Math.round((ms % 3600000) / 60000)} min`);
+const dist1 = (m) => `${(m / perUnit()).toFixed(1)} ${unit}`;
+const speedOf = (r) => (r.end > r.start ? (r.distance_m / perUnit()) / ((r.end - r.start) / 3600000) : 0);
+const inputTime = (t) => new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
 function showView(v) {
   view = v;
   try { localStorage.setItem("view", v); } catch (e) {}
   document.querySelectorAll(".chip[data-view]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === v));
   $("view-overview").hidden = v !== "overview";
-  $("view-live").hidden = v !== "live";
-  if (v === "live") loadLive();
+  $("view-data").hidden = v !== "data";
+  if (v === "data") loadTrips();
 }
 
-function renderLive() {
-  if (!live) return;
-  const vals = live.values;
-  const newest = Math.max(0, ...vals.map((v) => v.t || 0));
-  $("live-head").textContent = !vals.length || !newest ? "No engine data yet. It appears after a phone with the new app syncs."
-    : live.now - newest <= 60000 ? `Live · ${vals.length} values` : `From the last drive, ${fmt(newest)} · ${vals.length} values`;
+async function loadTrips() {
+  try {
+    const r = await fetch("/api/trips", { cache: "no-store" });
+    if (!r.ok) return;
+    trips = (await r.json()).trips;
+    renderTrips();
+    if (!range) {
+      if (trips.length) pickTrip(trips[0]);
+      else { $("range-title").textContent = "No drives yet"; $("range-sub").textContent = "They appear after a phone syncs."; }
+    }
+  } catch (e) { $("range-sub").textContent = "Hub unreachable."; }
+}
 
-  const cats = $("live-cats");
+const TRIP_COLUMNS = [
+  ["start", "Started", (r) => fmt(r.start), (r) => r.start],
+  ["length", "Length", (r) => lengthOf(r.end - r.start), (r) => r.end - r.start],
+  ["distance", "Distance", (r) => dist1(r.distance_m), (r) => r.distance_m],
+  ["speed", "Avg speed", (r) => `${Math.round(speedOf(r))} ${unit === "km" ? "km/h" : "mph"}`, speedOf],
+  ["soot", "Soot", (r) => `${r.soot_start ?? "?"}→${r.soot_end ?? "?"}%`, (r) => (r.soot_end ?? 0) - (r.soot_start ?? 0)],
+  ["temp", "Peak DPF", (r) => (r.peak_temp == null ? "—" : `${r.peak_temp}°C`), (r) => r.peak_temp ?? -1],
+  ["regens", "Regens", (r) => r.regens || "—", (r) => r.regens],
+  ["warnings", "Warnings", (r) => r.warnings || "—", (r) => r.warnings],
+  ["driver", "Driver", (r) => r.drivers.join(", "), (r) => r.drivers.join(", ")],
+];
+
+function renderTrips() {
+  if (!trips) return;
+  const head = $("trip-head");
+  head.innerHTML = "";
+  for (const [key, title] of TRIP_COLUMNS) {
+    const th = document.createElement("th");
+    if (key === sortKey) th.setAttribute("aria-sort", sortDesc ? "descending" : "ascending");
+    const b = document.createElement("button");
+    b.className = "sort";
+    b.textContent = title + (key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
+    b.addEventListener("click", () => { sortDesc = key === sortKey ? !sortDesc : true; sortKey = key; renderTrips(); });
+    th.appendChild(b);
+    head.appendChild(th);
+  }
+  const by = TRIP_COLUMNS.find((c) => c[0] === sortKey)[3];
+  const sorted = [...trips].sort((a, b) => {
+    const x = by(a), y = by(b);
+    return (x < y ? -1 : x > y ? 1 : 0) * (sortDesc ? -1 : 1);
+  });
+  const body = $("trip-rows");
+  body.innerHTML = trips.length ? "" : `<tr><td colspan="9" class="empty">No drives yet. They appear after a phone syncs.</td></tr>`;
+  for (const t of sorted) {
+    const tr = document.createElement("tr");
+    tr.className = "clickable";
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    if (base && base.trip === t.start) tr.setAttribute("aria-current", "true");
+    TRIP_COLUMNS.forEach(([, , cell], k) => { const td = document.createElement("td"); td.textContent = cell(t); if (!k) td.className = "when"; tr.appendChild(td); });
+    tr.addEventListener("click", () => pickTrip(t));
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickTrip(t); } });
+    body.appendChild(tr);
+  }
+}
+
+// A frame can follow the trip's last reading by one reading's pace
+const pickTrip = (t) => setBase({ from: t.start, to: t.end + 10000, title: `Trip · ${fmt(t.start)}`, trip: t.start });
+
+function setBase(r) {
+  base = r;
+  setRange(r);
+  renderTrips();
+}
+
+function setRange(r) {
+  range = r;
+  document.querySelectorAll("#range-chips .chip").forEach((b) => b.setAttribute("aria-pressed", +b.dataset.days === base.days || (b.dataset.days === "all" && base.days === "all")));
+  $("range-from").value = inputTime(r.from);
+  $("range-to").value = inputTime(r.to);
+  $("range-title").textContent = r.title;
+  $("range-sub").textContent = `${fmt(r.from)} to ${fmt(r.to)} · ${lengthOf(r.to - r.from)}`;
+  $("zoom-reset").hidden = r === base;
+  loadRange();
+}
+
+async function loadRange() {
+  const token = ++loadToken;
+  const q = `from=${Math.floor(range.from)}&to=${Math.ceil(range.to)}`;
+  try {
+    const r = await fetch(`/api/stats?${q}`, { cache: "no-store" });
+    if (!r.ok || token !== loadToken) return;
+    values = (await r.json()).values;
+    renderValues();
+    drawCharts(q, token);
+  } catch (e) { if (token === loadToken) $("range-sub").textContent = "Hub unreachable."; }
+}
+
+function drawCharts(q, token) {
+  const stack = $("stack");
+  stack.innerHTML = "";
+  charts = [];
+  const shown = picks.map((id) => values.find((v) => v.id === id)).filter(Boolean);
+  if (!shown.length) stack.innerHTML = `<p class="empty">Pick values below to chart them.</p>`;
+  for (const v of shown) {
+    const box = document.createElement("div");
+    box.className = "stacked";
+    const head = document.createElement("div");
+    head.className = "stacked-head";
+    const h3 = document.createElement("h3"); h3.textContent = v.label;
+    const x = document.createElement("button");
+    x.className = "remove";
+    x.textContent = "×";
+    x.setAttribute("aria-label", `Remove ${v.label}`);
+    x.addEventListener("click", () => togglePick(v.id));
+    head.append(h3, x);
+    const host = document.createElement("div");
+    host.className = "chart";
+    host.innerHTML = `<div class="empty">Loading…</div>`;
+    box.append(head, host);
+    stack.appendChild(box);
+    const c = { v, host, pts: null };
+    charts.push(c);
+    fetch(`/api/series?id=${encodeURIComponent(v.id)}&${q}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (token === loadToken) { c.pts = j.points; plot(c); } })
+      .catch(() => { host.innerHTML = `<div class="empty">Hub unreachable.</div>`; });
+  }
+}
+
+function togglePick(id) {
+  picks = picks.includes(id) ? picks.filter((p) => p !== id) : [...picks, id];
+  try { localStorage.setItem("picks", JSON.stringify(picks)); } catch (e) {}
+  renderValues();
+  drawCharts(`from=${Math.floor(range.from)}&to=${Math.ceil(range.to)}`, ++loadToken);
+}
+
+const moveCursor = (t) => charts.forEach((c) => c.cursor && c.cursor(t));
+
+/** One value on the shared time axis `range`: the average as a line, the min-max as a band, broken where nothing was read.
+ *  Moving over any chart moves the cursor on all of them; dragging across one zooms all of them. */
+function plot(c) {
+  const { host, pts, v } = c;
+  host.innerHTML = "";
+  c.cursor = null;
+  if (!pts) return;
+  if (!pts.length) { host.innerHTML = `<div class="empty">Not read in this period.</div>`; return; }
+  const readout = document.createElement("div");
+  readout.className = "readout";
+  host.appendChild(readout);
+  const svg = el("svg", { role: "img", "aria-label": `${v.label} chart` }, host);
+  svg.style.height = "160px";
+  const W = svg.clientWidth || 900, H = 160, L = 64, R = 8, T = 8, B = 22;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const { from: t0, to: t1 } = range;
+  const x = (t) => L + (W - L - R) * (t - t0) / (t1 - t0);
+  const tAt = (px) => t0 + (t1 - t0) * (px - L) / (W - L - R);
+  const isEnum = !!v.enum;
+  // A flag that fired at any moment in a bucket shows, so an enum plots each bucket's max
+  const val = (p) => (isEnum ? p[3] : p[1]);
+  const lo0 = isEnum ? 0 : Math.min(...pts.map((p) => p[2])), hi0 = isEnum ? Math.max(1, v.enum.length - 1) : Math.max(...pts.map((p) => p[3]));
+  const pad = isEnum ? 0 : (hi0 - lo0) * 0.05 || 1;
+  const lo = lo0 - pad, hi = hi0 + pad;
+  const y = (n) => H - B - (H - B - T) * ((n - lo) / (hi - lo));
+
+  const ticks = isEnum ? v.enum.map((_, i) => i) : [lo, (lo + hi) / 2, hi];
+  for (const at of ticks) {
+    el("line", { x1: L, x2: W - R, y1: y(at), y2: y(at), stroke: css("--chart-grid"), "stroke-width": 1 }, svg);
+    el("text", { x: L - 6, y: y(at) + 4, fill: css("--muted-soft"), "text-anchor": "end" }, svg).textContent = isEnum ? v.enum[at] : +at.toPrecision(3);
+  }
+  const shade = (a, b, color, opacity) => {
+    const x0 = Math.max(L, x(a)), x1 = Math.min(W - R, x(b));
+    if (x1 > L && x0 < W - R) el("rect", { x: x0, y: T, width: Math.max(2, x1 - x0), height: H - B - T, fill: css(color), opacity }, svg);
+  };
+  for (const r of (data && data.regens) || []) shade(r.start, r.end ?? t1, "--primary", 0.14);
+  // Only checks on live values: a trend warning (regens too frequent) stays open for weeks and would grey every chart
+  for (const a of (warnData && warnData.history) || []) if (ruleOf(a.key).values.length) shade(a.start, a.end ?? t1, "--muted-soft", 0.22);
+
+  const span = t1 - t0;
+  const tick = (t) => (span <= 10 * 60000 ? time(t) : span <= 36 * 3600000 ? hhmm(t) : span <= 14 * DAY ? `${day(t)} ${hhmm(t)}` : day(t));
+  [0, 0.25, 0.5, 0.75, 1].forEach((f) => {
+    el("text", { x: L + (W - L - R) * f, y: H - 6, fill: css("--muted-soft"), "text-anchor": f === 0 ? "start" : f === 1 ? "end" : "middle" }, svg).textContent = tick(t0 + span * f);
+  });
+
+  // Between drives the car was parked: a line across would be a ramp that never happened
+  const gap = Math.max(10 * 60000, 5 * span / 1500);
+  const segments = [];
+  pts.forEach((p, i) => { if (!i || p[0] - pts[i - 1][0] > gap) segments.push([]); segments.at(-1).push(p); });
+  segments.slice(1).forEach((s, i) => { // dashed: joins the drives so a trend reads, without looking like a reading
+    const a = segments[i].at(-1), b = s[0];
+    el("line", { x1: x(a[0]), y1: y(val(a)), x2: x(b[0]), y2: y(val(b)), stroke: css("--muted-soft"), "stroke-width": 1, "stroke-dasharray": "3 3" }, svg);
+  });
+  for (const s of segments) {
+    if (!isEnum && s.some((p) => p[2] !== p[3])) {
+      const band = [...s.map((p) => `${x(p[0])},${y(p[3])}`), ...[...s].reverse().map((p) => `${x(p[0])},${y(p[2])}`)];
+      el("polygon", { points: band.join(" "), fill: css("--primary"), opacity: 0.2 }, svg);
+    }
+    const d = s.map((p, i) => {
+      if (!i) return `M${x(p[0])},${y(val(p))}`;
+      return isEnum ? `L${x(p[0])},${y(val(s[i - 1]))} L${x(p[0])},${y(val(p))}` : `L${x(p[0])},${y(val(p))}`;
+    }).join(" ");
+    el("path", { d: s.length > 1 ? d : `${d} L${x(s[0][0])},${y(val(s[0]))}`, fill: "none", stroke: css("--primary"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+  }
+
+  const cross = el("line", { y1: T, y2: H - B, stroke: css("--muted-soft"), "stroke-width": 1, visibility: "hidden" }, svg);
+  const dot = el("circle", { r: 4, fill: css("--ink"), visibility: "hidden" }, svg);
+  const sel = el("rect", { y: T, height: H - B - T, fill: css("--ink"), opacity: 0.12, visibility: "hidden" }, svg);
+  const describe = (p) => {
+    const when = span > DAY ? fmt(p[0]) : time(p[0]);
+    const spread = !isEnum && p[2] !== p[3] ? ` (${p[2].toFixed(v.decimals)} to ${p[3].toFixed(v.decimals)})` : "";
+    return `${when} · ${valueText({ ...v, value: val(p) })}${spread}`;
+  };
+  readout.textContent = describe(pts.at(-1));
+  c.cursor = (t) => {
+    if (t == null) { readout.textContent = describe(pts.at(-1)); cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); return; }
+    let a = 0, b = pts.length - 1;
+    while (b - a > 1) { const m = (a + b) >> 1; if (pts[m][0] < t) a = m; else b = m; }
+    const p = Math.abs(pts[a][0] - t) < Math.abs(pts[b][0] - t) ? pts[a] : pts[b];
+    readout.textContent = describe(p);
+    cross.setAttribute("x1", x(t)); cross.setAttribute("x2", x(t)); cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", x(p[0])); dot.setAttribute("cy", y(val(p))); dot.setAttribute("visibility", "visible");
+  };
+
+  const hit = el("rect", { x: L, y: 0, width: W - L - R, height: H - B, fill: "transparent" }, svg);
+  const pxOf = (e) => {
+    const box = svg.getBoundingClientRect();
+    return Math.min(W - R, Math.max(L, (e.clientX - box.left) * (W / box.width)));
+  };
+  let dragFrom = null;
+  hit.addEventListener("pointerdown", (e) => { dragFrom = pxOf(e); hit.setPointerCapture(e.pointerId); moveCursor(tAt(dragFrom)); });
+  hit.addEventListener("pointermove", (e) => {
+    const px = pxOf(e);
+    moveCursor(tAt(px));
+    if (dragFrom != null) {
+      sel.setAttribute("x", Math.min(dragFrom, px)); sel.setAttribute("width", Math.abs(px - dragFrom)); sel.setAttribute("visibility", "visible");
+    }
+  });
+  hit.addEventListener("pointerup", (e) => {
+    const px = pxOf(e), a = tAt(Math.min(dragFrom, px)), b = tAt(Math.max(dragFrom, px));
+    const far = Math.abs(px - dragFrom) > 8;
+    dragFrom = null;
+    sel.setAttribute("visibility", "hidden");
+    if (far && b - a >= 10000) setRange({ from: a, to: b, title: `${base.title} · zoomed` });
+  });
+  hit.addEventListener("pointercancel", () => { dragFrom = null; sel.setAttribute("visibility", "hidden"); });
+  hit.addEventListener("pointerleave", () => { if (dragFrom == null) moveCursor(null); });
+}
+
+/** "min 50 · avg 62 · max 70", or how long the value spent in each state. */
+function spreadOf(v) {
+  if (!v.count) return "Not read in this period";
+  if (v.shares) return Object.entries(v.shares).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, s]) => `${v.enum[k] ?? k} ${Math.round(s * 100)}%`).join(" · ");
+  const n = (x) => x.toFixed(v.decimals);
+  return `min ${n(v.min)} · avg ${n(v.avg)} · max ${n(v.max)}`;
+}
+
+function renderValues() {
+  const known = [...new Set(values.map((v) => v.category))];
+  const order = [...CAT_ORDER.filter((c) => known.includes(c)), ...known.filter((c) => !CAT_ORDER.includes(c)).sort()];
+  const cats = $("data-cats");
   cats.innerHTML = "";
-  for (const c of [null, ...[...new Set(vals.map((v) => v.category))].sort()]) {
+  for (const c of [null, ...order]) {
     const b = document.createElement("button");
     b.className = "chip";
     b.textContent = c ?? "All";
     b.setAttribute("aria-pressed", c === cat);
-    b.addEventListener("click", () => { cat = c; renderLive(); });
+    b.addEventListener("click", () => { cat = c; renderValues(); });
     cats.appendChild(b);
   }
-
-  const rows = $("live-rows");
+  const rows = $("data-rows");
   rows.innerHTML = "";
-  const shown = vals.filter((v) => (cat == null || v.category === cat) && (!query || v.name.toLowerCase().includes(query.toLowerCase())));
-  if (!shown.length) rows.innerHTML = `<p class="empty">No value matches.</p>`;
-  for (const v of shown) {
-    const row = document.createElement("div");
-    row.className = "row";
-    row.tabIndex = 0;
-    row.setAttribute("role", "button");
-    row.setAttribute("aria-expanded", open === v.id);
-    const name = document.createElement("span"); name.className = "name"; name.textContent = v.name;
-    const sub = document.createElement("span"); sub.className = "sub"; sub.textContent = cat == null ? v.category : `Request 21 ${v.id.slice(0, 2)}`;
-    name.appendChild(sub);
-    const val = document.createElement("span"); val.className = "val"; val.textContent = valueText(v);
-    if (v.t) { const a = document.createElement("span"); a.className = "age"; a.dataset.t = v.t; a.textContent = age(v.t); val.appendChild(a); }
-    row.append(name, val);
-    const toggle = () => { open = open === v.id ? null : v.id; renderLive(); };
-    row.addEventListener("click", toggle);
-    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
-    rows.appendChild(row);
-    if (open === v.id) {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `<p class="hint" style="margin-top: 0">Last 30 minutes it was read · hover or tap to read</p>`;
-      const host = document.createElement("div"); host.className = "chart";
-      card.appendChild(host);
-      rows.appendChild(card);
-      loadSeries(v, host);
+  const q = query.toLowerCase();
+  const shown = values.filter((v) => (cat == null || v.category === cat) && (!q || `${v.label} ${v.name} ${v.about}`.toLowerCase().includes(q)));
+  if (!shown.length) rows.innerHTML = `<p class="empty">${values.length ? "No value matches." : "No engine data yet. It appears after a phone syncs."}</p>`;
+  for (const c of order) {
+    const inCat = shown.filter((v) => v.category === c);
+    if (!inCat.length) continue;
+    const h = document.createElement("h3");
+    h.className = "cat-head";
+    h.textContent = c;
+    rows.appendChild(h);
+    for (const v of inCat) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-pressed", picks.includes(v.id));
+      const name = document.createElement("span"); name.className = "name"; name.textContent = v.label;
+      if (v.about) { const a = document.createElement("span"); a.className = "about"; a.textContent = v.about; name.appendChild(a); }
+      if (v.label !== v.name) { const s = document.createElement("span"); s.className = "sub"; s.textContent = v.name; name.appendChild(s); }
+      const val = document.createElement("span"); val.className = "val"; val.textContent = valueText({ ...v, value: v.last });
+      const sp = document.createElement("span"); sp.className = "age"; sp.textContent = spreadOf(v); val.appendChild(sp);
+      row.append(name, val);
+      row.addEventListener("click", () => togglePick(v.id));
+      row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePick(v.id); } });
+      rows.appendChild(row);
     }
   }
 }
 
-async function loadSeries(v, host) {
-  try {
-    const r = await fetch(`/api/series?id=${encodeURIComponent(v.id)}&span=1800000`, { cache: "no-store" });
-    const pts = (await r.json()).points;
-    chart(host, pts.map((p) => p[0]), pts.map((p) => p[1]), {
-      columns: false, empty: "Not read yet.", axisFmt: time,
-      label: (i) => `${time(pts[i][0])} · ${valueText({ ...v, value: pts[i][1] })}`,
-    });
-  } catch (e) { host.innerHTML = `<div class="empty">Hub unreachable.</div>`; }
+/** A regen's own view: the same charts, from 5 min before to 10 min after, with the values that tell a burn's story. */
+function openRegen(r) {
+  picks = REGEN_PICKS;
+  setBase({ from: r.start - 300000, to: (r.end ?? Date.now()) + 600000, title: `Regen · ${fmt(r.start)}` });
+  showView("data");
+  $("stack-card").scrollIntoView();
 }
 
-async function loadLive() {
-  try {
-    const r = await fetch("/api/live", { cache: "no-store" });
-    if (!r.ok) return;
-    const next = await r.json();
-    const same = live && JSON.stringify(next.values) === JSON.stringify(live.values);
-    live = next;
-    // Values unchanged (e.g. parked at home): only refresh the ages, so focus and the open chart survive
-    if (same) document.querySelectorAll("#live-rows .age").forEach((a) => { a.textContent = age(+a.dataset.t); });
-    else renderLive();
-  } catch (e) { $("live-head").textContent = "Hub unreachable, retrying…"; }
-}
-$("live-search").addEventListener("input", (e) => { query = e.target.value.trim(); renderLive(); });
+document.querySelectorAll("#range-chips .chip").forEach((b) => b.addEventListener("click", () => {
+  const days = b.dataset.days === "all" ? "all" : +b.dataset.days;
+  const now = Date.now();
+  const from = days === "all" ? (trips && trips.length ? trips.at(-1).start : now - DAY) : now - days * DAY;
+  setBase({ from, to: now, title: days === "all" ? "Everything logged" : `Last ${b.textContent}`, days });
+}));
+for (const id of ["range-from", "range-to"]) $(id).addEventListener("change", () => {
+  const from = new Date($("range-from").value).getTime(), to = new Date($("range-to").value).getTime();
+  if (from < to) setBase({ from, to, title: "Chosen period" });
+});
+$("zoom-reset").addEventListener("click", () => setRange(base));
+$("data-search").addEventListener("input", (e) => { query = e.target.value.trim(); renderValues(); });
 document.querySelectorAll(".chip[data-view]").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
-setInterval(() => { if (view === "live") loadLive(); }, 10000);
 
 // ---------- Warnings: every stored warning, and a detail view with the values around it ----------
 let warnData = null;
@@ -735,18 +1058,21 @@ async function loadWarnings() {
 async function load() {
   try {
     const r = await fetch("/api/summary", { cache: "no-store" });
+    const first = !data;
     if (r.ok) { data = await r.json(); render(); }
-    loadWarnings();
+    await loadWarnings();
+    if (first) charts.forEach(plot); // charts drawn before this have no regen or warning shading yet
   } catch (e) { $("status-text").textContent = "Hub unreachable, retrying…"; }
 }
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
   unit = b.dataset.unit;
   try { localStorage.setItem("unit", unit); } catch (e) {}
   render();
+  renderTrips();
 }));
 let resize;
-addEventListener("resize", () => { clearTimeout(resize); resize = setTimeout(() => { render(); renderLive(); }, 150); });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+addEventListener("resize", () => { clearTimeout(resize); resize = setTimeout(() => { render(); charts.forEach(plot); }, 150); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { render(); charts.forEach(plot); });
 showView(view);
 load();
 setInterval(load, 30000);

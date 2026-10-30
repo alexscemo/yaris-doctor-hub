@@ -1,6 +1,6 @@
 FROM python:3.12-alpine
 WORKDIR /app
-COPY app/app.py app/dashboard.html app/icon.svg ./
+COPY app/app.py app/labels.py app/dashboard.html app/icon.svg ./
 COPY app/fonts ./fonts
 ENV DB_PATH=/data/hub.db \
     PORT=8765
