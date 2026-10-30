@@ -7,7 +7,7 @@ LABELS = {
     "F1.48": ("DPF temperature", "Exhaust temperature sensor 2, the one the app shows. Around 600 °C during a regen."),
     "F1.32": ("Exhaust temperature, sensor 1", "The other exhaust temperature sensor."),
     "EF.0": ("DPF pressure difference", "Pressure lost across the filter. Rises with soot and ash, and with exhaust flow."),
-    "DF.119": ("Regen flag", "Set while a regen burns; this is the bit the app logs. The sheet calls it VN Turbo Operation Prohibit. The ECU also sets it as the engine stops."),
+    "DF.119": ("Old regen flag", "Set while a regen burns, and also as the engine stops; older app builds logged this bit. The sheet calls it VN Turbo Operation Prohibit."),
     "DF.72": ("ECU regen status", "The sheet's regen status. It stayed at Standby through a confirmed regen on this car, so don't read it as the regen flag."),
     "24.0": ("Air-fuel ratio (lambda)", "Above 1 is more air than the fuel needs, which is normal for a diesel."),
     "24.16": ("Air-fuel sensor voltage", ""),

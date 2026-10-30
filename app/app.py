@@ -293,12 +293,12 @@ SAME_BURN_MS = 30 * 60_000  # the phone's mergeSameBurn gap: a burn does not res
 
 def merge_same_burn(merged):
     """Joins finished regens an ignition cycle split, as the phone's mergeSameBurn (Regens.kt) does: the second starts
-    within SAME_BURN_MS of the first's end and its soot carries on (not 5 points or more lower, which is a new burn)."""
+    within SAME_BURN_MS of the first's end and its soot carries on (within 5 points; a drop or a jump is a new burn)."""
     out = []
     for r in merged:
         last = out[-1] if out else None
         if (last is not None and last["end"] is not None and r["end"] is not None and 0 <= r["start"] - last["end"] <= SAME_BURN_MS
-                and last["soot_end"] is not None and r["soot_start"] is not None and r["soot_start"] >= last["soot_end"] - 5):
+                and last["soot_end"] is not None and r["soot_start"] is not None and abs(r["soot_start"] - last["soot_end"]) <= 5):
             last["end"], last["soot_end"] = r["end"], r["soot_end"]
             last["devices"] |= r["devices"]
         else:

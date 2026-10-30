@@ -24,6 +24,12 @@ class HubTest(unittest.TestCase):
     def sync(self, dev, name, samples=(), regens=(), now=10**13):
         return app.ingest(self.db, {"device_id": dev, "name": name, "samples": list(samples), "regens": list(regens)}, now)
 
+    def test_merge_same_burn_joins_a_split_burn_but_not_two_burns(self):
+        burn = lambda start, end, s0, s1: {"start": start, "end": end, "soot_start": s0, "soot_end": s1, "devices": {A}}
+        self.assertEqual(len(app.merge_same_burn([burn(0, 10 * MIN, 80, 30), burn(15 * MIN, 25 * MIN, 32, 10)])), 1)
+        # The 29 Oct drive: two full burns, 29 min apart
+        self.assertEqual(len(app.merge_same_burn([burn(0, 13 * MIN, 100, 10), burn(42 * MIN, 56 * MIN, 90, 10)])), 2)
+
     def test_resending_the_same_rows_is_harmless(self):
         rows = drive(A, 0, 10, 0)
         self.sync(A, "Alex", rows)
